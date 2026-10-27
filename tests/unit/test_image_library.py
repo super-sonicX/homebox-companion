@@ -60,6 +60,123 @@ async def test_only_google_images_lite_and_ebay_are_enabled(provider):
         await lib.search_images("Polymaker dryer", provider)
 
 
+def _png_or_webp_with_alpha(fmt: str) -> bytes:
+    img = Image.new("RGBA", (120, 60))
+    img.paste((210, 30, 30, 255), (0, 0, 40, 60))
+    img.paste((0, 0, 255, 128), (40, 0, 80, 60))
+    img.paste((30, 150, 60, 0), (80, 0, 120, 60))
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, **({"lossless": True} if fmt == "WEBP" else {}))
+    return buf.getvalue()
+
+
+def _photo_at(jpg: bytes, x: int, y: int) -> tuple[int, int, int]:
+    with Image.open(io.BytesIO(jpg)) as photo:
+        assert photo.format == "JPEG"
+        assert photo.mode == "RGB"
+        pixel = photo.getpixel((x, y))
+        assert isinstance(pixel, tuple) and len(pixel) == 3
+        return (int(pixel[0]), int(pixel[1]), int(pixel[2]))
+
+
+def _rough_rgb(actual: tuple[int, int, int], expected: tuple[int, int, int], tolerance: int = 10) -> None:
+    assert all(abs(a - b) <= tolerance for a, b in zip(actual, expected, strict=True)), (
+        actual,
+        expected,
+    )
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "WEBP"])
+def test_transparent_rgba_imports_flatten_on_white_even_without_transparency_info(fmt: str):
+    source = _png_or_webp_with_alpha(fmt)
+    with Image.open(io.BytesIO(source)) as original:
+        assert original.mode == "RGBA"
+        # In normal PNG RGBA, the alpha channel is present WITHOUT info["transparency"].
+        assert "transparency" not in original.info
+    jpeg = lib._to_jpeg(source)
+    _rough_rgb(_photo_at(jpeg, 20, 30), (210, 30, 30))
+    _rough_rgb(_photo_at(jpeg, 60, 30), (127, 127, 255))
+    _rough_rgb(_photo_at(jpeg, 100, 30), (255, 255, 255))
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "GIF"])
+def test_transparent_palette_imports_flatten_onto_white(fmt: str):
+    img = Image.new("P", (100, 48), 0)
+    img.putpalette([4, 6, 8, 200, 40, 15] + [0] * 762)
+    img.paste(1, (50, 0, 100, 48))
+    raw = io.BytesIO()
+    img.save(raw, format=fmt, transparency=0)
+    jpeg = lib._to_jpeg(raw.getvalue())
+    _rough_rgb(_photo_at(jpeg, 20, 24), (255, 255, 255))
+    _rough_rgb(_photo_at(jpeg, 80, 24), (200, 40, 15))
+
+
+def test_rgb_png_transparency_key_is_flattened_to_white():
+    img = Image.new("RGB", (100, 50), (0, 0, 250))
+    img.paste((80, 160, 30), (50, 0, 100, 50))
+    raw = io.BytesIO()
+    img.save(raw, format="PNG", transparency=(0, 0, 250))
+    with Image.open(io.BytesIO(raw.getvalue())) as source:
+        assert source.mode == "RGB"
+        assert "transparency" in source.info
+    jpeg = lib._to_jpeg(raw.getvalue())
+    _rough_rgb(_photo_at(jpeg, 20, 25), (255, 255, 255))
+    _rough_rgb(_photo_at(jpeg, 80, 25), (80, 160, 30))
+
+
+def test_grayscale_with_alpha_is_flattened_to_white():
+    img = Image.new("LA", (100, 50), (30, 0))
+    img.paste((90, 255), (50, 0, 100, 50))
+    raw = io.BytesIO()
+    img.save(raw, format="PNG")
+    jpeg = lib._to_jpeg(raw.getvalue())
+    _rough_rgb(_photo_at(jpeg, 20, 25), (255, 255, 255))
+    _rough_rgb(_photo_at(jpeg, 80, 25), (90, 90, 90))
+
+
+def test_opaque_rgb_jpeg_import_preserves_existing_conversion():
+    img = Image.new("RGB", (96, 64), (60, 120, 180))
+    raw = io.BytesIO()
+    img.save(raw, format="JPEG", quality=95)
+    # The already deployed JPEG pipeline is precisely: EXIF transpose, resize,
+    # RGB conversion, then JPEG quality 85. Opaque photos should retain that.
+    with Image.open(io.BytesIO(raw.getvalue())) as source:
+        from PIL import ImageOps
+
+        old = ImageOps.exif_transpose(source)
+        old.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        baseline = io.BytesIO()
+        old.convert("RGB").save(baseline, format="JPEG", quality=85, optimize=True)
+    assert lib._to_jpeg(raw.getvalue()) == baseline.getvalue()
+
+
+def test_fully_opaque_rgba_skips_white_compositing():
+    img = Image.new("RGBA", (16, 12), (25, 70, 140, 255))
+    flattened = lib._flatten_transparency_to_white(img)
+    assert flattened.mode == "RGB"
+    assert flattened.getpixel((3, 4)) == (25, 70, 140)
+
+
+@pytest.mark.asyncio
+async def test_both_provider_import_actions_use_white_flattened_jpeg(monkeypatch):
+    raw = _png_or_webp_with_alpha("PNG")
+    calls: list[str] = []
+
+    async def fetch_image(url: str) -> bytes:
+        calls.append(url)
+        return raw
+
+    monkeypatch.setattr(lib, "_fetch_image", fetch_image)
+    for provider in ("google-lite", "ebay-main-image"):
+        token = lib._sign_result(_example(image_url=f"https://example.org/{provider}.png"))
+        jpeg = await lib.download_selected_image(token)
+        _rough_rgb(_photo_at(jpeg, 100, 30), (255, 255, 255))
+    assert calls == [
+        "https://example.org/google-lite.png",
+        "https://example.org/ebay-main-image.png",
+    ]
+
+
 def test_web_download_is_reencoded_to_safe_jpeg():
     buf = io.BytesIO()
     Image.new("RGBA", (32, 24), (200, 100, 50, 120)).save(buf, format="PNG")

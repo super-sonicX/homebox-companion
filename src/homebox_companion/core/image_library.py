@@ -420,7 +420,36 @@ async def _fetch_image(url: str) -> bytes:
             raise ImageLibraryError("Unable to retrieve the image from its source website.") from exc
 
 
+def _flatten_transparency_to_white(image: Image.Image) -> Image.Image:
+    """Return an opaque RGB photo, compositing actual alpha onto white.
+
+    PNG/WebP RGBA images often have an alpha channel but no transparency
+    entry in image.info. We must inspect alpha pixels, not rely on that
+    metadata; otherwise convert("RGB") silently discards alpha and exposes
+    invisible RGB colours as black or other unexpected backgrounds.
+
+    Opaque RGB/JPEG images retain the existing RGB conversion path.
+    """
+    has_alpha = (
+        "A" in image.getbands()
+        or "a" in image.getbands()
+        or "transparency" in image.info  # GIF/PNG palette or PNG RGB tRNS
+    )
+    if not has_alpha:
+        return image.convert("RGB")
+
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    if alpha.getextrema()[0] == 255:
+        # An RGBA image whose pixels are all opaque needs no white compositing.
+        return rgba.convert("RGB")
+
+    white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    return Image.alpha_composite(white, rgba).convert("RGB")
+
+
 def _to_jpeg(content: bytes) -> bytes:
+    """Re-encode imported library photographs as JPEG, with white behind real transparency."""
     try:
         with Image.open(io.BytesIO(content)) as original:
             if original.width * original.height > _MAX_PIXELS:
@@ -428,13 +457,7 @@ def _to_jpeg(content: bytes) -> bytes:
             original.seek(0)
             im = ImageOps.exif_transpose(original)
             im.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
-            if im.mode in ("RGBA", "LA", "P") and "transparency" in im.info:
-                canvas = Image.new("RGB", im.size, "white")
-                rgba = im.convert("RGBA")
-                canvas.paste(rgba, mask=rgba.getchannel("A"))
-                im = canvas
-            else:
-                im = im.convert("RGB")
+            im = _flatten_transparency_to_white(im)
             buf = io.BytesIO()
             im.save(buf, format="JPEG", quality=85, optimize=True)
             return buf.getvalue()
