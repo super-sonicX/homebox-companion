@@ -13,7 +13,7 @@
 	let { name, manufacturer = null, modelNumber = null, onSelect }: Props = $props();
 
 	type ImageProvider = 'serpapi' | 'ebay' | 'google' | 'openverse';
-	let provider = $state<ImageProvider>('serpapi');
+	let provider = $state<ImageProvider | null>(null);
 	let googleConfigured = $state(false);
 	let serpapiConfigured = $state(false);
 	let query = $state('');
@@ -25,6 +25,7 @@
 	let showKeyInput = $state(false);
 	let providerKey = $state('');
 	let savingKey = $state(false);
+	let keySaved = $state(false);
 
 	onMount(() => {
 		void initialise();
@@ -36,18 +37,18 @@
 			const config = await libraryImages.config();
 			googleConfigured = config.google_configured;
 			serpapiConfigured = config.serpapi_configured;
-			provider = serpapiConfigured ? 'serpapi' : googleConfigured ? 'google' : 'serpapi';
-			if (serpapiConfigured || googleConfigured) await searchImages();
-			else showKeyInput = true;
+			// Opening an inventory item must never automatically consume search credits.
+			// A provider-button click initiates the first search.
 		} catch (ex) {
 			error = ex instanceof Error ? ex.message : 'Unable to load image-search configuration';
 		}
 	}
 
 	async function searchImages() {
-		if (searching || !query.trim()) return;
+		if (searching || !provider || !query.trim()) return;
 		searching = true;
 		error = '';
+		keySaved = false;
 		results = [];
 		try {
 			const response = await libraryImages.search(query.trim(), provider);
@@ -87,7 +88,9 @@
 			serpapiConfigured = config.serpapi_configured;
 			providerKey = '';
 			showKeyInput = false;
-			await searchImages();
+			keySaved = true;
+			// Configuring a provider is not consent to run a paid search.
+			// The user can click Search after saving the key.
 		} catch (ex) {
 			error = ex instanceof Error ? ex.message : 'Unable to save the provider key';
 		} finally {
@@ -96,11 +99,14 @@
 	}
 
 	async function changeProvider(next: ImageProvider) {
-		if (next === provider) return;
+		if (searching || savingKey) return;
+		// A provider-button click always initiates a search if configured,
+		// even when the same provider is clicked again.
 		provider = next;
 		results = [];
 		hasSearched = false;
 		showKeyInput = false;
+		keySaved = false;
 		error = '';
 		const needsKey =
 			next === 'google' ? !googleConfigured : next !== 'openverse' && !serpapiConfigured;
@@ -128,6 +134,7 @@
 			class="rounded-lg p-2 text-body-sm {provider === 'serpapi'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
+			disabled={searching || savingKey}
 			onclick={() => changeProvider('serpapi')}>Google Images</button
 		>
 		<button
@@ -135,6 +142,7 @@
 			class="rounded-lg p-2 text-body-sm {provider === 'ebay'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
+			disabled={searching || savingKey}
 			onclick={() => changeProvider('ebay')}>eBay listings</button
 		>
 		<button
@@ -142,6 +150,7 @@
 			class="rounded-lg p-2 text-body-sm {provider === 'google'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
+			disabled={searching || savingKey}
 			onclick={() => changeProvider('google')}>Serper (existing)</button
 		>
 		<button
@@ -149,6 +158,7 @@
 			class="rounded-lg p-2 text-body-sm {provider === 'openverse'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
+			disabled={searching || savingKey}
 			onclick={() => changeProvider('openverse')}>Openverse · Free</button
 		>
 	</div>
@@ -205,11 +215,16 @@
 				>
 			{/if}
 		</div>
-	{:else}
+	{:else if provider !== null}
 		{#if provider === 'ebay'}
 			<p class="text-caption text-neutral-400">
 				Searching image results from eBay UK listing pages. Seller photos may be copyrighted and may
 				show used or different-condition products. Check the exact model before importing.
+			</p>
+		{/if}
+		{#if keySaved}
+			<p class="text-caption text-success-400" role="status">
+				Search key saved. Click Search to retrieve images.
 			</p>
 		{/if}
 		<form
@@ -237,6 +252,13 @@
 				Search
 			</button>
 		</form>
+	{:else}
+		<p
+			class="rounded-lg border border-neutral-700/70 p-3 text-body-sm text-neutral-400"
+			role="status"
+		>
+			Choose an image provider above to search. Opening an item does not start an image search.
+		</p>
 	{/if}
 
 	{#if error}
