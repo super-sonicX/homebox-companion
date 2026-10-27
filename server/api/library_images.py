@@ -10,9 +10,8 @@ from homebox_companion import HomeboxGateway
 from homebox_companion.core.image_library import (
     ImageLibraryError,
     download_selected_image,
-    has_google_key,
+    get_ebay_listing_photos,
     has_serpapi_key,
-    save_google_key,
     save_serpapi_key,
     search_images,
 )
@@ -24,7 +23,6 @@ router = APIRouter(prefix="/library-images", dependencies=[Depends(require_auth)
 
 class ProviderKeyRequest(BaseModel):
     key: str = Field(max_length=512)
-    provider: str = Field(default="serper", pattern="^(serper|serpapi)$")
 
 
 class ImageAttachRequest(BaseModel):
@@ -42,28 +40,36 @@ def _raise_library_error(exc: ImageLibraryError) -> HTTPException:
 
 @router.get("/config")
 async def library_config() -> dict[str, bool]:
-    return {"google_configured": has_google_key(), "serpapi_configured": has_serpapi_key()}
+    return {"serpapi_configured": has_serpapi_key()}
 
 
 @router.put("/config")
 async def update_library_config(payload: ProviderKeyRequest) -> dict[str, bool]:
     try:
-        if payload.provider == "serpapi":
-            save_serpapi_key(payload.key)
-        else:
-            save_google_key(payload.key)
+        save_serpapi_key(payload.key)
     except ImageLibraryError as exc:
         raise _raise_library_error(exc) from exc
-    return {"google_configured": has_google_key(), "serpapi_configured": has_serpapi_key()}
+    return {"serpapi_configured": has_serpapi_key()}
 
 
 @router.get("/search")
 async def library_search(
     q: str = Query(min_length=1, max_length=180),
-    provider: str = Query(pattern="^(google|serpapi|ebay|openverse)$"),
+    provider: str = Query(pattern="^(serpapi|ebay)$"),
 ) -> dict[str, Any]:
     try:
         return await search_images(q, provider)
+    except ImageLibraryError as exc:
+        raise _raise_library_error(exc) from exc
+
+
+@router.get("/ebay-photos")
+async def ebay_listing_photos(
+    product_id: str = Query(pattern=r"^[0-9]{9,15}$"),
+) -> dict[str, Any]:
+    """User-triggered photo gallery for one eBay UK listing (extra SerpApi request)."""
+    try:
+        return await get_ebay_listing_photos(product_id)
     except ImageLibraryError as exc:
         raise _raise_library_error(exc) from exc
 

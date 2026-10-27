@@ -18,9 +18,7 @@ const result = {
 function mockLibrary(api: {
 	on: (method: string, path: string, handler: () => ReturnType<typeof json>) => void;
 }) {
-	api.on('GET', '/api/library-images/config', () =>
-		json({ google_configured: false, serpapi_configured: true })
-	);
+	api.on('GET', '/api/library-images/config', () => json({ serpapi_configured: true }));
 	api.on('GET', '/api/library-images/search', () =>
 		json({ provider: 'serpapi', query: 'Storage box', results: [result] })
 	);
@@ -42,6 +40,10 @@ test('Review lets a catalogue photo join the gallery without replacing originals
 	await analyzePhotos(page);
 	await page.getByRole('tab', { name: 'Library Images' }).click();
 	await expect(page.getByRole('heading', { name: 'Library Images' })).toBeVisible();
+	const providers = page.getByRole('group', { name: 'Image search provider' });
+	await expect(providers.getByRole('button')).toHaveCount(2);
+	await expect(providers.getByRole('button', { name: 'Google Images Lite' })).toBeVisible();
+	await expect(providers.getByRole('button', { name: 'eBay Search' })).toBeVisible();
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
@@ -126,9 +128,7 @@ test('Library tab adds a primary photo to an existing Homebox item on explicit a
 
 test('eBay image results are selected explicitly on the Review page', async ({ page, api }) => {
 	const providers: string[] = [];
-	api.on('GET', '/api/library-images/config', () =>
-		json({ google_configured: false, serpapi_configured: true })
-	);
+	api.on('GET', '/api/library-images/config', () => json({ serpapi_configured: true }));
 	api.on('GET', '/api/library-images/search', (request) => {
 		providers.push(new URL(request.url()).searchParams.get('provider') ?? '');
 		return json({
@@ -146,8 +146,8 @@ test('eBay image results are selected explicitly on the Review page', async ({ p
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
 	expect(providers).toEqual([]);
-	await page.getByRole('button', { name: 'eBay listings' }).click();
-	await expect(page.getByText('Searching image results from eBay UK listing pages.')).toBeVisible();
+	await page.getByRole('button', { name: 'eBay Search' }).click();
+	await expect(page.getByText('These are eBay sellers', { exact: false })).toBeVisible();
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
 	expect(providers).toEqual(['ebay']);
 });
@@ -156,13 +156,11 @@ test('SerpApi key can be configured from Library without using an OpenAI key', a
 	page,
 	api,
 }) => {
-	const savedKeys: Array<{ provider: string; key: string }> = [];
-	api.on('GET', '/api/library-images/config', () =>
-		json({ google_configured: false, serpapi_configured: false })
-	);
+	const savedKeys: Array<{ key: string }> = [];
+	api.on('GET', '/api/library-images/config', () => json({ serpapi_configured: false }));
 	api.on('PUT', '/api/library-images/config', (request) => {
-		savedKeys.push(request.postDataJSON() as { provider: string; key: string });
-		return json({ google_configured: false, serpapi_configured: true });
+		savedKeys.push(request.postDataJSON() as { key: string });
+		return json({ serpapi_configured: true });
 	});
 	api.on('GET', '/api/library-images/search', () =>
 		json({ provider: 'serpapi', query: 'Storage box', results: [result] })
@@ -173,14 +171,14 @@ test('SerpApi key can be configured from Library without using an OpenAI key', a
 	await analyzePhotos(page);
 	await page.getByRole('tab', { name: 'Library Images' }).click();
 	await page.getByRole('button', { name: 'Google Images Lite' }).click();
-	await expect(page.getByText('250 searches per month')).toBeVisible();
+	await expect(page.getByText('Connect your SerpApi key once', { exact: false })).toBeVisible();
 	await page.getByPlaceholder('SerpApi API key').fill('mock-serpapi-secret');
 	await page.getByRole('button', { name: 'Save key' }).click();
 	await expect(page.getByText('Search key saved. Click Search to retrieve images.')).toBeVisible();
 	await expect(page.getByText('Test catalogue image')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Search', exact: true }).click();
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
-	expect(savedKeys).toEqual([{ provider: 'serpapi', key: 'mock-serpapi-secret' }]);
+	expect(savedKeys).toEqual([{ key: 'mock-serpapi-secret' }]);
 });
 
 test('opening and switching existing items never triggers search until a provider is clicked', async ({
@@ -188,9 +186,7 @@ test('opening and switching existing items never triggers search until a provide
 	api,
 }) => {
 	const queries: string[] = [];
-	api.on('GET', '/api/library-images/config', () =>
-		json({ google_configured: false, serpapi_configured: true })
-	);
+	api.on('GET', '/api/library-images/config', () => json({ serpapi_configured: true }));
 	api.on('GET', '/api/library-images/items', () =>
 		json({
 			items: [
@@ -256,4 +252,59 @@ test('opening and switching existing items never triggers search until a provide
 	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect.poll(() => queries.length).toBe(2);
 	expect(queries).toEqual(['serpapi', 'serpapi']);
+});
+
+test('eBay listing photos are fetched only after clicking View listing photos', async ({
+	page,
+	api,
+}) => {
+	const queries: string[] = [];
+	let detailCalls = 0;
+	api.on('GET', '/api/library-images/config', () => json({ serpapi_configured: true }));
+	api.on('GET', '/api/library-images/search', (request) => {
+		queries.push(new URL(request.url()).searchParams.get('provider') ?? '');
+		return json({
+			provider: 'ebay',
+			query: 'Storage box',
+			results: [
+				{
+					...result,
+					title: 'Polymaker dryer — eBay listing',
+					source: 'eBay UK',
+					source_url: 'https://www.ebay.co.uk/itm/388216346120',
+					product_id: '388216346120',
+				},
+			],
+		});
+	});
+	api.on('GET', '/api/library-images/ebay-photos', (request) => {
+		detailCalls++;
+		expect(new URL(request.url()).searchParams.get('product_id')).toBe('388216346120');
+		return json({
+			product_id: '388216346120',
+			title: 'Polymaker dryer — eBay listing',
+			results: [
+				{ ...result, id: 'signed-gallery-photo-1', title: 'Photo 1', product_id: '388216346120' },
+				{ ...result, id: 'signed-gallery-photo-2', title: 'Photo 2', product_id: '388216346120' },
+				{ ...result, id: 'signed-gallery-photo-3', title: 'Photo 3', product_id: '388216346120' },
+			],
+		});
+	});
+	api.on('POST', '/api/tools/vision/detect', () => json(detectedItems(['Storage box'])));
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByRole('tab', { name: 'Library Images' }).click();
+	expect(queries).toEqual([]);
+	expect(detailCalls).toBe(0);
+	await page.getByRole('button', { name: 'eBay Search' }).click();
+	await expect(page.getByText('Polymaker dryer — eBay listing')).toBeVisible();
+	expect(queries).toEqual(['ebay']);
+	expect(detailCalls).toBe(0);
+	await page.getByRole('button', { name: 'View listing photos (extra API search)' }).click();
+	await expect(page.getByText('Photo 3')).toBeVisible();
+	expect(detailCalls).toBe(1);
+	await page.getByRole('button', { name: 'Back to eBay listings' }).click();
+	await expect(page.getByText('Polymaker dryer — eBay listing')).toBeVisible();
+	expect(detailCalls).toBe(1);
 });

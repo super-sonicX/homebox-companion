@@ -4,6 +4,7 @@ import base64
 import io
 
 import pytest
+import yaml
 from PIL import Image
 
 from homebox_companion.core import image_library as lib
@@ -52,51 +53,11 @@ def test_download_rejects_private_ip_with_verified_token():
         lib.verify_result(token)
 
 
+@pytest.mark.parametrize("provider", ["google", "openverse", "serper", "shopping"])
 @pytest.mark.asyncio
-async def test_search_result_response_has_signed_photo_and_source(monkeypatch):
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "images": [
-                    {
-                        "title": "Polymaker dryer",
-                        "imageUrl": "https://example.org/full.jpg",
-                        "thumbnailUrl": "https://example.org/thumb.jpg",
-                        "link": "https://example.org/page",
-                        "domain": "example.org",
-                        "position": 1,
-                    }
-                ]
-            }
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def post(self, url, headers, json):
-            assert url == "https://google.serper.dev/images"
-            assert headers["X-API-KEY"] == "test-provider-key"
-            assert json["num"] == 18
-            return FakeResponse()
-
-    monkeypatch.setattr(lib, "get_google_key", lambda: "test-provider-key")
-    monkeypatch.setattr(lib.httpx, "AsyncClient", FakeClient)
-    lib._RESULTS.clear()
-    result = await lib.search_images("Polymaker PolyDryer", "google")
-    assert len(result["results"]) == 1
-    item = result["results"][0]
-    assert item["title"] == "Polymaker dryer"
-    assert item["source_url"] == "https://example.org/page"
-    assert lib.verify_result(item["id"])["image_url"] == "https://example.org/full.jpg"
+async def test_only_google_images_lite_and_ebay_are_enabled(provider):
+    with pytest.raises(lib.ImageLibraryError, match="Unsupported image search provider"):
+        await lib.search_images("Polymaker dryer", provider)
 
 
 def test_web_download_is_reencoded_to_safe_jpeg():
@@ -160,25 +121,32 @@ async def test_serpapi_google_images_maps_search_results(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ebay_filter_searches_only_ebay_listing_results(monkeypatch):
+async def test_ebay_search_returns_listing_main_image_without_extra_api_request(monkeypatch):
     class FakeResponse:
         def raise_for_status(self):
-            pass
+            return None
 
         def json(self):
             return {
-                "images_results": [
+                "organic_results": [
                     {
-                        "title": "Used dryer box",
-                        "original": "https://i.ebayimg.com/images/g/aaaa/s-l1600.jpg",
-                        "thumbnail": "https://serpapi.com/searches/test/images/ebay.jpeg",
-                        "link": "https://www.ebay.co.uk/itm/123456789",
-                        "source": "eBay UK",
+                        "product_id": "388216346120",
+                        "title": "PolyDryer Box Only",
+                        "thumbnail": "https://i.ebayimg.com/images/g/AAAA/s-l500.webp",
+                        "link": "https://www.ebay.co.uk/itm/388216346120",
+                        "price": "£25.00",
                     },
                     {
-                        "title": "Unrelated non-eBay source",
-                        "original": "https://example.org/photo.jpg",
-                        "link": "https://example.org/not-an-ebay-listing",
+                        "product_id": "invalid",
+                        "title": "Invalid product ID",
+                        "thumbnail": "https://i.ebayimg.com/images/g/BBBB/s-l500.webp",
+                        "link": "https://www.ebay.co.uk/itm/invalid",
+                    },
+                    {
+                        "product_id": "257768939026",
+                        "title": "Wrong site",
+                        "thumbnail": "https://i.ebayimg.com/images/g/CCCC/s-l500.webp",
+                        "link": "https://other.example.net/itm/257768939026",
                     },
                 ]
             }
@@ -195,8 +163,12 @@ async def test_ebay_filter_searches_only_ebay_listing_results(monkeypatch):
 
         async def get(self, url, params):
             assert url == "https://serpapi.com/search.json"
-            assert params["engine"] == "google_images_light"
-            assert params["q"] == "Polymaker dryer box site:ebay.co.uk"
+            assert params == {
+                "engine": "ebay",
+                "_nkw": "Polymaker dryer box",
+                "ebay_domain": "ebay.co.uk",
+                "api_key": "mock-private-serpapi-key",
+            }
             return FakeResponse()
 
     monkeypatch.setattr(lib, "get_serpapi_key", lambda: "mock-private-serpapi-key")
@@ -204,9 +176,99 @@ async def test_ebay_filter_searches_only_ebay_listing_results(monkeypatch):
     lib._RESULTS.clear()
     result = await lib.search_images("Polymaker dryer box", "ebay")
     assert len(result["results"]) == 1
-    assert result["results"][0]["source_url"] == "https://www.ebay.co.uk/itm/123456789"
-    assert result["results"][0]["license"] == ""
-    assert lib.verify_result(result["results"][0]["id"])["image_url"].startswith("https://i.ebayimg.com")
+    item = result["results"][0]
+    assert item["title"] == "PolyDryer Box Only"
+    assert item["product_id"] == "388216346120"
+    assert item["source_url"] == "https://www.ebay.co.uk/itm/388216346120"
+    assert item["license"] == ""
+    assert lib.verify_result(item["id"])["image_url"] == "https://i.ebayimg.com/images/g/AAAA/s-l500.webp"
+
+
+@pytest.mark.asyncio
+async def test_ebay_product_gallery_only_runs_after_explicit_request_and_caches(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "product_results": {
+                    "product_id": "388216346120",
+                    "title": "PolyDryer Box Only",
+                    "media": [
+                        {
+                            "type": "image",
+                            "image": [
+                                {
+                                    "size": {"width": 140, "height": 140},
+                                    "link": "https://i.ebayimg.com/images/g/AAAA/s-l140.png",
+                                },
+                                {
+                                    "size": {"width": 500, "height": 500},
+                                    "link": "https://i.ebayimg.com/images/g/AAAA/s-l500.png",
+                                },
+                                {
+                                    "size": {"width": 960, "height": 960},
+                                    "link": "https://i.ebayimg.com/images/g/AAAA/s-l960.png",
+                                },
+                            ],
+                        },
+                        {
+                            "type": "image",
+                            "image": [
+                                {
+                                    "size": {"width": 500, "height": 500},
+                                    "link": "https://i.ebayimg.com/images/g/BBBB/s-l500.png",
+                                },
+                            ],
+                        },
+                        {"type": "video", "link": "https://example.org/video"},
+                    ],
+                }
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params):
+            calls.append(params)
+            assert url == "https://serpapi.com/search.json"
+            assert params == {
+                "engine": "ebay_product",
+                "product_id": "388216346120",
+                "ebay_domain": "ebay.co.uk",
+                "api_key": "mock-private-serpapi-key",
+            }
+            return FakeResponse()
+
+    monkeypatch.setattr(lib, "get_serpapi_key", lambda: "mock-private-serpapi-key")
+    monkeypatch.setattr(lib.httpx, "AsyncClient", FakeClient)
+    lib._EBAY_GALLERIES.clear()
+    result = await lib.get_ebay_listing_photos("388216346120")
+    assert result["product_id"] == "388216346120"
+    assert len(result["results"]) == 2
+    assert lib.verify_result(result["results"][0]["id"])["image_url"].endswith("/s-l960.png")
+    assert result["results"][0]["thumbnail_url"].endswith("/s-l500.png")
+    assert result["results"][1]["source_url"] == "https://www.ebay.co.uk/itm/388216346120"
+    cached = await lib.get_ebay_listing_photos("388216346120")
+    assert cached == result
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("item_number", ["", "../admin", "123", "https://ebay.co.uk/itm/388216346120"])
+@pytest.mark.asyncio
+async def test_ebay_gallery_rejects_invalid_item_numbers_before_provider_call(item_number):
+    with pytest.raises(lib.ImageLibraryError, match="Invalid eBay listing number"):
+        await lib.get_ebay_listing_photos(item_number)
 
 
 def test_serpapi_key_save_preserves_existing_serper_key(monkeypatch, tmp_path):
@@ -216,19 +278,9 @@ def test_serpapi_key_save_preserves_existing_serper_key(monkeypatch, tmp_path):
     monkeypatch.delenv("HBC_IMAGE_SEARCH_SERPAPI_KEY", raising=False)
     lib.save_serpapi_key("new-serpapi-key")
     assert settings.stat().st_mode & 0o777 == 0o600
-    assert lib.get_google_key() == "old-serper-key"
+    assert yaml.safe_load(settings.read_text())["serper_key"] == "old-serper-key"
     assert lib.get_serpapi_key() == "new-serpapi-key"
     assert "new-serpapi-key" not in str(settings.stat())
-
-
-def test_serper_save_preserves_serpapi_key(monkeypatch, tmp_path):
-    settings = tmp_path / "library-image-search.yaml"
-    settings.write_text("serpapi_key: keep-serpapi-key\n", encoding="utf-8")
-    monkeypatch.setattr(lib, "_DATA_FILE", settings)
-    monkeypatch.delenv("HBC_IMAGE_SEARCH_SERPER_KEY", raising=False)
-    lib.save_google_key("second-provider-key")
-    assert lib.get_serpapi_key() == "keep-serpapi-key"
-    assert lib.get_google_key() == "second-provider-key"
 
 
 @pytest.mark.asyncio

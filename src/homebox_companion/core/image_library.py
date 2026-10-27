@@ -1,9 +1,8 @@
-"""Safe online image search and import for personal inventory cataloguing.
+"""Safe SerpApi image search for catalogue photos and eBay UK listings.
 
-Google Images results use Serper or SerpApi (not direct Google scraping).
-SerpApi can filter Google Images by eBay UK listing pages.
-Openverse offers openly licensed search results without an API key.
-The server signs result references to prevent arbitrary fetch URLs from clients.
+Use Google Images Lite for product photos and eBay Search for listing main images.
+Full eBay listing photo galleries are fetched only after an explicit user action.
+Signed image selections are checked before safe, public HTTPS downloads.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import tempfile
@@ -36,68 +36,15 @@ _MAX_DOWNLOAD = 8 * 1024 * 1024
 _MAX_PIXELS = 24_000_000
 Image.MAX_IMAGE_PIXELS = _MAX_PIXELS
 _RESULTS: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = {}
+_EBAY_GALLERIES: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class ImageLibraryError(ValueError):
     """A user-safe error from an image provider or download."""
 
 
-def has_google_key() -> bool:
-    return bool(get_google_key())
-
-
-def get_google_key() -> str:
-    configured = os.getenv("HBC_IMAGE_SEARCH_SERPER_KEY", "").strip()
-    if configured:
-        return configured
-    if not _DATA_FILE.is_file():
-        return ""
-    try:
-        content = yaml.safe_load(_DATA_FILE.read_text(encoding="utf-8")) or {}
-        return str(content.get("serper_key", "")).strip() if isinstance(content, dict) else ""
-    except (OSError, yaml.YAMLError) as exc:
-        logger.warning("Unable to read image search provider settings: {}", type(exc).__name__)
-        return ""
-
-
-def save_google_key(key: str) -> None:
-    """Persist an existing Serper key without removing other provider credentials."""
-    if os.getenv("HBC_IMAGE_SEARCH_SERPER_KEY"):
-        raise ImageLibraryError("Provider key is managed by the Docker environment.")
-    if len(key) > 512:
-        raise ImageLibraryError("Provider key is too long.")
-    _DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data: dict[str, str] = {}
-    if _DATA_FILE.is_file():
-        try:
-            loaded = yaml.safe_load(_DATA_FILE.read_text(encoding="utf-8")) or {}
-            if not isinstance(loaded, dict):
-                raise ImageLibraryError("Existing image-search settings are invalid.")
-            data = {str(k): str(v) for k, v in loaded.items()}
-        except (OSError, yaml.YAMLError) as exc:
-            raise ImageLibraryError("Unable to read existing image-search settings.") from exc
-
-    if key.strip():
-        data["serper_key"] = key.strip()
-    else:
-        data.pop("serper_key", None)
-
-    descriptor, temporary = tempfile.mkstemp(prefix=".library-image-search-", dir=_DATA_FILE.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as dest:
-            os.chmod(temporary, 0o600)
-            yaml.safe_dump(data, dest)
-            dest.flush()
-            os.fsync(dest.fileno())
-        os.replace(temporary, _DATA_FILE)
-        _DATA_FILE.chmod(0o600)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-    _RESULTS.clear()
-
-
 def get_serpapi_key() -> str:
-    """SerpApi (serpapi.com) is a different provider from Serper (serper.dev)."""
+    """Retrieve the one search-provider API key, never returning it to the browser."""
     configured = os.getenv("HBC_IMAGE_SEARCH_SERPAPI_KEY", "").strip()
     if configured:
         return configured
@@ -116,7 +63,7 @@ def has_serpapi_key() -> bool:
 
 
 def save_serpapi_key(key: str) -> None:
-    """Persist a SerpApi key while preserving any existing Serper settings."""
+    """Save the SerpApi key; leave any legacy settings intact for rollback."""
     if os.getenv("HBC_IMAGE_SEARCH_SERPAPI_KEY"):
         raise ImageLibraryError("SerpApi key is managed by the Docker environment.")
     if len(key) > 512:
@@ -204,128 +151,98 @@ def verify_result(token: str) -> dict[str, Any]:
         raise ImageLibraryError("Invalid library image selection.") from exc
 
 
-async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
+async def search_images(query: str, provider: str = "serpapi") -> dict[str, Any]:
+    """Search exactly one of two SerpApi engines on explicit user request."""
     q = " ".join(query.split())
     if not q or len(q) > 180:
         raise ImageLibraryError("Enter a product name or model number (maximum 180 characters).")
-    if provider not in ("google", "serpapi", "ebay", "openverse"):
+    if provider not in ("serpapi", "ebay"):
         raise ImageLibraryError("Unsupported image search provider.")
-    if provider == "google" and not has_google_key():
-        raise ImageLibraryError("Serper API key required. Configure Serper or choose another provider.")
-    if provider in ("serpapi", "ebay") and not has_serpapi_key():
-        raise ImageLibraryError("SerpApi key required. Configure SerpApi to search Google Images or eBay listings.")
+    if not has_serpapi_key():
+        raise ImageLibraryError("SerpApi key required. Configure it before searching.")
 
     cache_key = (provider, q.casefold())
     cached = _RESULTS.get(cache_key)
     if cached and time.monotonic() - cached[0] < 600:
         return {"provider": provider, "query": q, "results": cached[1]}
 
-    async with httpx.AsyncClient(timeout=18, follow_redirects=False, trust_env=False) as client:
+    params = (
+        {
+            "engine": "google_images_light",
+            "q": q,
+            "gl": "uk",
+            "hl": "en",
+            "google_domain": "google.co.uk",
+        }
+        if provider == "serpapi"
+        else {"engine": "ebay", "_nkw": q, "ebay_domain": "ebay.co.uk"}
+    )
+    params["api_key"] = get_serpapi_key()
+    async with httpx.AsyncClient(timeout=22, follow_redirects=False, trust_env=False) as client:
         try:
-            if provider == "google":
-                response = await client.post(
-                    "https://google.serper.dev/images",
-                    headers={"X-API-KEY": get_google_key(), "Content-Type": "application/json"},
-                    json={"q": q, "num": 18, "gl": "gb", "hl": "en"},
-                )
-            elif provider in ("serpapi", "ebay"):
-                search_term = q + " site:ebay.co.uk" if provider == "ebay" else q
-                response = await client.get(
-                    "https://serpapi.com/search.json",
-                    params={
-                        # Lite returns thumbnail, original, link, title, and source,
-                        # without the richer response data Companion does not need.
-                        "engine": "google_images_light",
-                        "q": search_term,
-                        "api_key": get_serpapi_key(),
-                        "gl": "uk",
-                        "hl": "en",
-                        "google_domain": "google.co.uk",
-                    },
-                )
-            else:
-                response = await client.get(
-                    "https://api.openverse.org/v1/images/",
-                    params={"q": q, "page_size": 18, "page": 1},
-                    headers={"User-Agent": "HomeboxCompanion-LibraryImages/1.0"},
-                )
+            response = await client.get("https://serpapi.com/search.json", params=params)
             response.raise_for_status()
             payload = response.json()
-            if provider in ("serpapi", "ebay") and payload.get("error"):
+            if not isinstance(payload, dict):
+                raise ImageLibraryError("Unexpected SerpApi response.")
+            if payload.get("error"):
                 raise ImageLibraryError("SerpApi rejected the search. Check the API key and remaining free searches.")
         except ImageLibraryError:
             raise
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
-            logger.warning("Image library {} search failed: {}", provider, type(exc).__name__)
-            raise ImageLibraryError("Image search was unavailable. Check provider credits or retry later.") from exc
+            logger.warning("Library {} search failed: {}", provider, type(exc).__name__)
+            raise ImageLibraryError("Image search unavailable. Check SerpApi credits and retry.") from exc
 
-    if provider == "google":
-        raw_results = payload.get("images", [])
-    elif provider in ("serpapi", "ebay"):
-        raw_results = payload.get("images_results", [])
-    else:
-        raw_results = payload.get("results", [])
+    raw_results = payload.get("images_results" if provider == "serpapi" else "organic_results", [])
     if not isinstance(raw_results, list):
-        raise ImageLibraryError("Image provider returned an unexpected response.")
+        raise ImageLibraryError("SerpApi returned an unexpected image-search result.")
 
     selected: list[dict[str, Any]] = []
-    for index, entry in enumerate(raw_results[:40]):
+    for entry in raw_results[:75]:
         if not isinstance(entry, dict):
             continue
-        if provider == "google":
-            original = _valid_public_url(entry.get("imageUrl"))
-            thumbnail = _valid_public_url(entry.get("thumbnailUrl"))
+        if provider == "ebay":
+            # eBay Search provides the *listing main image*, without needing the
+            # individual listing page or a separate product-details API request.
+            listing_id = str(entry.get("product_id") or "")
+            if not re.fullmatch(r"[0-9]{9,15}", listing_id):
+                continue
             source_url = _valid_public_url(entry.get("link"))
-            license_name = ""
-            attribution = ""
-            original_source = entry.get("domain") or entry.get("source") or ""
-        elif provider in ("serpapi", "ebay"):
+            listing_host = (urlsplit(source_url).hostname or "").lower()
+            if listing_host not in {"ebay.co.uk", "www.ebay.co.uk", "ebay.com", "www.ebay.com"}:
+                continue
+            original = _valid_public_url(entry.get("thumbnail"))
+            thumbnail = original
+            source_name = "eBay UK"
+        else:
+            listing_id = ""
             original = _valid_public_url(entry.get("original"))
             thumbnail = _valid_public_url(entry.get("thumbnail"))
-            # Occasionally Google returns only a thumbnail or a non-HTTP image identifier.
             original = original or thumbnail
             source_url = _valid_public_url(entry.get("link"))
-            if provider == "ebay":
-                # The site-restricted search should not surface unrelated sources.
-                source_host = (urlsplit(source_url).hostname or "").lower()
-                if source_host not in ("ebay.co.uk", "ebay.com") and not source_host.endswith(
-                    (".ebay.co.uk", ".ebay.com")
-                ):
-                    continue
-            license_name = ""  # A listing's photograph is NOT automatically licensed for reuse.
-            attribution = ""
-            original_source = entry.get("source") or ""
-        else:
-            original = _valid_public_url(entry.get("url"))
-            thumbnail = _valid_public_url(entry.get("thumbnail"))
-            source_url = _valid_public_url(entry.get("foreign_landing_url"))
-            license_name = entry.get("license") or ""
-            attribution = entry.get("attribution") or ""
-            original_source = entry.get("domain") or entry.get("source") or ""
+            source_name = str(entry.get("source") or "")[:80] or (urlsplit(original).hostname or "")
         if not original:
             continue
-        if not isinstance(original_source, str):
-            original_source = ""
-        preview = thumbnail or original
         signed = _sign_result(
             {
                 "image_url": original,
                 "thumbnail_url": thumbnail,
                 "source_url": source_url,
-                "license": license_name,
-                "attribution": attribution,
+                "license": "",
+                "attribution": "",
             }
         )
         selected.append(
             {
                 "id": signed,
-                "thumbnail_url": preview,
+                "thumbnail_url": thumbnail or original,
                 "title": str(entry.get("title") or "Product photo")[:150],
-                "source": original_source[:80] or urlsplit(original).hostname,
+                "source": source_name,
                 "source_url": source_url or "",
-                "license": license_name,
-                "attribution": str(attribution)[:250],
-                "rank": index + 1,
+                "license": "",
+                "attribution": "",
+                "rank": len(selected) + 1,
+                "product_id": listing_id or None,
             }
         )
         if len(selected) >= 18:
@@ -334,6 +251,103 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
         _RESULTS.clear()
     _RESULTS[cache_key] = (time.monotonic(), selected)
     return {"provider": provider, "query": q, "results": selected}
+
+
+async def get_ebay_listing_photos(product_id: str) -> dict[str, Any]:
+    """Fetch the entire listing gallery only if the user clicks View listing photos.
+
+    One SerpApi eBay Product lookup is charged separately from the main search;
+    successful results are cached for ten minutes.
+    """
+    if not re.fullmatch(r"[0-9]{9,15}", product_id):
+        raise ImageLibraryError("Invalid eBay listing number.")
+    if not has_serpapi_key():
+        raise ImageLibraryError("SerpApi key required. Configure it before searching.")
+    cached = _EBAY_GALLERIES.get(product_id)
+    if cached and time.monotonic() - cached[0] < 600:
+        return cached[1]
+
+    async with httpx.AsyncClient(timeout=22, follow_redirects=False, trust_env=False) as client:
+        try:
+            response = await client.get(
+                "https://serpapi.com/search.json",
+                params={
+                    "engine": "ebay_product",
+                    "product_id": product_id,
+                    "ebay_domain": "ebay.co.uk",
+                    "api_key": get_serpapi_key(),
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ImageLibraryError("Unexpected eBay product response.")
+            if payload.get("error"):
+                raise ImageLibraryError("SerpApi could not retrieve this eBay listing's gallery.")
+        except ImageLibraryError:
+            raise
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning("eBay listing gallery request failed: {}", type(exc).__name__)
+            raise ImageLibraryError("Listing photos were unavailable. Try again later.") from exc
+
+    product = payload.get("product_results") or {}
+    if not isinstance(product, dict) or str(product.get("product_id") or "") != product_id:
+        raise ImageLibraryError("eBay returned no matching product details.")
+    title = str(product.get("title") or "eBay product")[:150]
+    source_url = f"https://www.ebay.co.uk/itm/{product_id}"
+    media = product.get("media") or []
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in media[:40] if isinstance(media, list) else []:
+        if not isinstance(item, dict) or item.get("type") != "image":
+            continue
+        images = item.get("image") or []
+        if not isinstance(images, list):
+            continue
+        sizes: list[tuple[int, str]] = []
+        for candidate in images:
+            if not isinstance(candidate, dict):
+                continue
+            link = _valid_public_url(candidate.get("link"))
+            if not link:
+                continue
+            meta = candidate.get("size") or {}
+            width = meta.get("width", 0) if isinstance(meta, dict) else 0
+            sizes.append((width if isinstance(width, int) else 0, link))
+        if not sizes:
+            continue
+        sizes.sort(key=lambda x: x[0])
+        original = sizes[-1][1]
+        thumbnail = min(sizes, key=lambda x: abs(x[0] - 500))[1]
+        if original in seen:
+            continue
+        seen.add(original)
+        results.append(
+            {
+                "id": _sign_result(
+                    {
+                        "image_url": original,
+                        "thumbnail_url": thumbnail,
+                        "source_url": source_url,
+                        "license": "",
+                        "attribution": "",
+                    }
+                ),
+                "thumbnail_url": thumbnail,
+                "title": f"{title} — Photo {len(results) + 1}",
+                "source": "eBay UK",
+                "source_url": source_url,
+                "license": "",
+                "attribution": "",
+                "rank": len(results) + 1,
+                "product_id": product_id,
+            }
+        )
+    result = {"product_id": product_id, "title": title, "results": results}
+    if len(_EBAY_GALLERIES) >= 80:
+        _EBAY_GALLERIES.clear()
+    _EBAY_GALLERIES[product_id] = (time.monotonic(), result)
+    return result
 
 
 class _PublicResolver(AbstractResolver):

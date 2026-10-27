@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Search, LoaderCircle, Images, ExternalLink, KeyRound } from '@lucide/svelte';
+	import { Search, LoaderCircle, Images, ExternalLink, KeyRound, ArrowLeft } from '@lucide/svelte';
 	import { libraryImages, type LibraryImageResult } from '$lib/api/libraryImages';
 
 	interface Props {
@@ -11,10 +11,8 @@
 	}
 
 	let { name, manufacturer = null, modelNumber = null, onSelect }: Props = $props();
-
-	type ImageProvider = 'serpapi' | 'ebay' | 'google' | 'openverse';
+	type ImageProvider = 'serpapi' | 'ebay';
 	let provider = $state<ImageProvider | null>(null);
-	let googleConfigured = $state(false);
 	let serpapiConfigured = $state(false);
 	let query = $state('');
 	let results = $state<LibraryImageResult[]>([]);
@@ -26,30 +24,38 @@
 	let providerKey = $state('');
 	let savingKey = $state(false);
 	let keySaved = $state(false);
+	let loadingProductId = $state<string | null>(null);
+	let listingResults = $state<LibraryImageResult[]>([]);
+	let showingListingPhotos = $state(false);
+	let galleryTitle = $state('');
 
 	onMount(() => {
 		void initialise();
 	});
 
 	async function initialise() {
+		// Preparing the search query and reading configuration must never spend API credits.
 		query = [manufacturer, modelNumber, name].filter(Boolean).join(' ').slice(0, 180);
 		try {
-			const config = await libraryImages.config();
-			googleConfigured = config.google_configured;
-			serpapiConfigured = config.serpapi_configured;
-			// Opening an inventory item must never automatically consume search credits.
-			// A provider-button click initiates the first search.
+			serpapiConfigured = (await libraryImages.config()).serpapi_configured;
 		} catch (ex) {
-			error = ex instanceof Error ? ex.message : 'Unable to load image-search configuration';
+			error = ex instanceof Error ? ex.message : 'Unable to load search configuration';
 		}
 	}
 
 	async function searchImages() {
 		if (searching || !provider || !query.trim()) return;
+		if (!serpapiConfigured) {
+			showKeyInput = true;
+			return;
+		}
 		searching = true;
 		error = '';
 		keySaved = false;
 		results = [];
+		listingResults = [];
+		showingListingPhotos = false;
+		loadingProductId = null;
 		try {
 			const response = await libraryImages.search(query.trim(), provider);
 			results = response.results;
@@ -60,6 +66,70 @@
 		} finally {
 			searching = false;
 		}
+	}
+
+	async function changeProvider(next: ImageProvider) {
+		if (searching || savingKey || loadingProductId) return;
+		provider = next;
+		results = [];
+		listingResults = [];
+		showingListingPhotos = false;
+		hasSearched = false;
+		showKeyInput = false;
+		keySaved = false;
+		error = '';
+		if (!serpapiConfigured) {
+			showKeyInput = true;
+			return;
+		}
+		// Clicking either of the two provider buttons initiates the search.
+		await searchImages();
+	}
+
+	async function saveKey() {
+		if (!providerKey.trim() || savingKey) return;
+		savingKey = true;
+		error = '';
+		try {
+			serpapiConfigured = (await libraryImages.setProviderKey(providerKey.trim()))
+				.serpapi_configured;
+			providerKey = '';
+			showKeyInput = false;
+			keySaved = true;
+			// Saving a key is not permission to make a search request.
+		} catch (ex) {
+			error = ex instanceof Error ? ex.message : 'Unable to save SerpApi key';
+		} finally {
+			savingKey = false;
+		}
+	}
+
+	async function openListingPhotos(item: LibraryImageResult) {
+		if (!item.product_id || loadingProductId || selectedBusy) return;
+		loadingProductId = item.product_id;
+		error = '';
+		try {
+			// The eBay Product API uses a separate SerpApi search credit.
+			// It is deliberately only called after clicking View listing photos.
+			const detail = await libraryImages.ebayPhotos(item.product_id);
+			if (!detail.results.length)
+				throw new Error('No additional photographs found for this listing.');
+			listingResults = results;
+			results = detail.results;
+			galleryTitle = detail.title;
+			showingListingPhotos = true;
+		} catch (ex) {
+			error = ex instanceof Error ? ex.message : 'Unable to load listing photographs';
+		} finally {
+			loadingProductId = null;
+		}
+	}
+
+	function backToListings() {
+		results = listingResults;
+		listingResults = [];
+		showingListingPhotos = false;
+		error = '';
 	}
 
 	async function selectImage(image: LibraryImageResult, primary: boolean) {
@@ -74,48 +144,6 @@
 			selectedBusy = null;
 		}
 	}
-
-	async function saveKey() {
-		if (!providerKey.trim() || savingKey) return;
-		savingKey = true;
-		error = '';
-		try {
-			const config = await libraryImages.setProviderKey(
-				provider === 'google' ? 'serper' : 'serpapi',
-				providerKey.trim()
-			);
-			googleConfigured = config.google_configured;
-			serpapiConfigured = config.serpapi_configured;
-			providerKey = '';
-			showKeyInput = false;
-			keySaved = true;
-			// Configuring a provider is not consent to run a paid search.
-			// The user can click Search after saving the key.
-		} catch (ex) {
-			error = ex instanceof Error ? ex.message : 'Unable to save the provider key';
-		} finally {
-			savingKey = false;
-		}
-	}
-
-	async function changeProvider(next: ImageProvider) {
-		if (searching || savingKey) return;
-		// A provider-button click always initiates a search if configured,
-		// even when the same provider is clicked again.
-		provider = next;
-		results = [];
-		hasSearched = false;
-		showKeyInput = false;
-		keySaved = false;
-		error = '';
-		const needsKey =
-			next === 'google' ? !googleConfigured : next !== 'openverse' && !serpapiConfigured;
-		if (needsKey) {
-			showKeyInput = true;
-			return;
-		}
-		await searchImages();
-	}
 </script>
 
 <section class="space-y-3 rounded-xl border border-neutral-700 bg-neutral-900/70 p-3">
@@ -124,17 +152,17 @@
 		<h3 class="font-semibold">Library Images</h3>
 	</div>
 	<p class="text-caption text-neutral-400">
-		Search by item name and model. Your own photos stay in the gallery. Check the model and source
-		before importing.
+		Search using the item name and model number. Choose an online photograph to add to your gallery
+		or use as the thumbnail; your own photos remain attached.
 	</p>
 
-	<div class="grid grid-cols-2 gap-2">
+	<div class="grid grid-cols-2 gap-2" role="group" aria-label="Image search provider">
 		<button
 			type="button"
 			class="rounded-lg p-2 text-body-sm {provider === 'serpapi'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
-			disabled={searching || savingKey}
+			disabled={searching || savingKey || loadingProductId !== null}
 			onclick={() => changeProvider('serpapi')}>Google Images Lite</button
 		>
 		<button
@@ -142,60 +170,33 @@
 			class="rounded-lg p-2 text-body-sm {provider === 'ebay'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
-			disabled={searching || savingKey}
-			onclick={() => changeProvider('ebay')}>eBay listings</button
-		>
-		<button
-			type="button"
-			class="rounded-lg p-2 text-body-sm {provider === 'google'
-				? 'bg-primary-600 text-neutral-100'
-				: 'bg-neutral-800 text-neutral-300'}"
-			disabled={searching || savingKey}
-			onclick={() => changeProvider('google')}>Serper (existing)</button
-		>
-		<button
-			type="button"
-			class="rounded-lg p-2 text-body-sm {provider === 'openverse'
-				? 'bg-primary-600 text-neutral-100'
-				: 'bg-neutral-800 text-neutral-300'}"
-			disabled={searching || savingKey}
-			onclick={() => changeProvider('openverse')}>Openverse · Free</button
+			disabled={searching || savingKey || loadingProductId !== null}
+			onclick={() => changeProvider('ebay')}>eBay Search</button
 		>
 	</div>
+	<p class="text-caption text-neutral-500">
+		Both searches use SerpApi. eBay Search shows the main picture of each matching UK listing.
+	</p>
 
-	{#if (provider === 'google' && !googleConfigured) || ((provider === 'serpapi' || provider === 'ebay') && !serpapiConfigured)}
-		<div class="rounded-lg border border-neutral-700 p-3 space-y-2">
-			{#if provider === 'google'}
-				<p class="text-body-sm text-neutral-300">
-					This legacy search uses Serper.dev, which is currently experiencing registration failures.
-					Choose Google Images Lite above to use a separate SerpApi account instead.
-				</p>
-				<a
-					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
-					href="https://serper.dev/"
-					target="_blank"
-					rel="noopener noreferrer">Serper website <ExternalLink size={14} /></a
-				>
-			{:else}
-				<p class="text-body-sm text-neutral-300">
-					Google Images Lite and eBay listing results use SerpApi, a different company from
-					Serper.dev. The free SerpApi plan includes 250 searches per month. The eBay tab filters
-					image search to eBay UK listings; no separate eBay API key is required.
-				</p>
-				<a
-					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
-					href="https://serpapi.com/"
-					target="_blank"
-					rel="noopener noreferrer">Create free SerpApi account <ExternalLink size={14} /></a
-				>
-			{/if}
+	{#if provider !== null && !serpapiConfigured}
+		<div class="space-y-2 rounded-lg border border-neutral-700 p-3">
+			<p class="text-body-sm text-neutral-300">
+				Connect your SerpApi key once to use Google Images Lite and eBay Search. Both count against
+				your SerpApi search allowance.
+			</p>
+			<a
+				class="inline-flex items-center gap-1 text-caption text-primary-400 underline"
+				href="https://serpapi.com/"
+				target="_blank"
+				rel="noopener noreferrer">SerpApi account <ExternalLink size={14} /></a
+			>
 			{#if showKeyInput}
 				<div class="flex gap-2">
 					<input
 						type="password"
 						class="input min-w-0 flex-1"
-						placeholder={provider === 'google' ? 'Serper API key' : 'SerpApi API key'}
 						autocomplete="off"
+						placeholder="SerpApi API key"
 						bind:value={providerKey}
 					/>
 					<button
@@ -210,16 +211,16 @@
 			{:else}
 				<button
 					type="button"
-					class="flex items-center gap-1 text-primary-400 text-body-sm"
-					onclick={() => (showKeyInput = true)}><KeyRound size={16} /> Configure search</button
+					class="inline-flex items-center gap-1 text-primary-400 text-body-sm"
+					onclick={() => (showKeyInput = true)}><KeyRound size={16} /> Configure SerpApi</button
 				>
 			{/if}
 		</div>
 	{:else if provider !== null}
-		{#if provider === 'ebay'}
+		{#if provider === 'ebay' && !showingListingPhotos}
 			<p class="text-caption text-neutral-400">
-				Searching image results from eBay UK listing pages. Seller photos may be copyrighted and may
-				show used or different-condition products. Check the exact model before importing.
+				These are eBay sellers' main listing photos. Verify the model and condition before
+				importing. Seller photos may be copyright-protected.
 			</p>
 		{/if}
 		{#if keySaved}
@@ -236,15 +237,15 @@
 		>
 			<input
 				class="input min-w-0 flex-1"
-				aria-label="Library image search"
-				placeholder="Item name and model number"
 				maxlength="180"
 				bind:value={query}
+				aria-label="Library image search"
+				placeholder="Item name and model number"
 			/>
 			<button
 				type="submit"
-				class="flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-neutral-100 text-body-sm"
-				disabled={searching || !query.trim()}
+				class="flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-body-sm text-neutral-100"
+				disabled={searching || loadingProductId !== null || !query.trim()}
 			>
 				{#if searching}<LoaderCircle size={16} class="animate-spin" />{:else}<Search
 						size={16}
@@ -264,22 +265,35 @@
 	{#if error}
 		<p class="rounded-lg bg-error-500/10 p-2 text-body-sm text-error-300" role="alert">{error}</p>
 	{/if}
-
 	{#if searching}
 		<p class="flex items-center gap-2 py-4 text-body-sm text-neutral-400">
 			<LoaderCircle size={16} class="animate-spin" /> Searching online images…
 		</p>
 	{:else if hasSearched && results.length === 0 && !error}
-		<p class="text-body-sm text-neutral-400 py-3">
-			No matching images found. Try a shorter model name or Google Images for less common products.
+		<p class="py-3 text-body-sm text-neutral-400">
+			No matching images found. Try a shorter model name or the other search provider.
 		</p>
 	{/if}
 
 	{#if results.length > 0}
-		<p class="text-caption text-neutral-500">
-			Showing {results.length} ranked matches. These are search results, not verified variants; check
-			the source. Copyright/licensing may restrict reuse.
-		</p>
+		{#if showingListingPhotos}
+			<div class="space-y-1">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1 text-primary-400 text-body-sm"
+					onclick={backToListings}><ArrowLeft size={16} /> Back to eBay listings</button
+				>
+				<p class="text-caption text-neutral-300">{galleryTitle}</p>
+				<p class="text-caption text-neutral-500">
+					All photos from one listing. Select any photograph below.
+				</p>
+			</div>
+		{:else}
+			<p class="text-caption text-neutral-500">
+				Showing {results.length} provider-ranked results, not verified exact-model matches. Check the
+				source and permitted reuse before importing.
+			</p>
+		{/if}
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
 			{#each results as item (item.id)}
 				<div class="overflow-hidden rounded-xl border border-neutral-700 bg-neutral-800/60">
@@ -297,7 +311,9 @@
 							{item.title}
 						</p>
 						<p class="truncate text-caption text-neutral-400">
-							{item.source}{item.license ? ' · ' + item.license : ''}
+							{item.source}{item.product_id && !showingListingPhotos
+								? ' · #' + item.product_id
+								: ''}
 						</p>
 						{#if item.source_url}
 							<button
@@ -307,16 +323,25 @@
 								>View source <ExternalLink size={12} /></button
 							>
 						{/if}
-						{#if item.attribution}
-							<p class="line-clamp-2 text-xxs text-neutral-400" title={item.attribution}>
-								Credit: {item.attribution}
-							</p>
+						{#if provider === 'ebay' && item.product_id && !showingListingPhotos}
+							<button
+								type="button"
+								class="flex items-center gap-1 text-primary-400 text-caption"
+								disabled={loadingProductId !== null || selectedBusy !== null}
+								onclick={() => openListingPhotos(item)}
+							>
+								{#if loadingProductId === item.product_id}<LoaderCircle
+										size={13}
+										class="animate-spin"
+									/>{/if}
+								View listing photos (extra API search)
+							</button>
 						{/if}
 						<div class="flex flex-col gap-1.5">
 							<button
 								type="button"
 								class="rounded-lg border border-neutral-600 p-2 text-caption text-neutral-200"
-								disabled={selectedBusy !== null}
+								disabled={selectedBusy !== null || loadingProductId !== null}
 								onclick={() => selectImage(item, false)}
 							>
 								{selectedBusy === item.id ? 'Importing…' : 'Add to gallery'}
@@ -324,7 +349,7 @@
 							<button
 								type="button"
 								class="rounded-lg bg-primary-600 p-2 text-caption font-medium text-neutral-100"
-								disabled={selectedBusy !== null}
+								disabled={selectedBusy !== null || loadingProductId !== null}
 								onclick={() => selectImage(item, true)}
 							>
 								{selectedBusy === item.id ? 'Importing…' : 'Use as thumbnail'}

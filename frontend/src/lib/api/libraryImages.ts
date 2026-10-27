@@ -10,6 +10,7 @@ export interface LibraryImageResult {
 	license: string;
 	attribution: string;
 	rank: number;
+	product_id?: string | null;
 }
 
 export interface LibraryItemSummary {
@@ -26,16 +27,20 @@ export interface LibraryItemDetail extends LibraryItemSummary {
 }
 
 export const libraryImages = {
-	config: () =>
-		request<{ google_configured: boolean; serpapi_configured: boolean }>('/library-images/config'),
-	setProviderKey: (provider: 'serper' | 'serpapi', key: string) =>
-		request<{ google_configured: boolean; serpapi_configured: boolean }>('/library-images/config', {
+	config: () => request<{ serpapi_configured: boolean }>('/library-images/config'),
+	setProviderKey: (key: string) =>
+		request<{ serpapi_configured: boolean }>('/library-images/config', {
 			method: 'PUT',
-			body: JSON.stringify({ provider, key }),
+			body: JSON.stringify({ key }),
 		}),
-	search: (query: string, provider: 'google' | 'serpapi' | 'ebay' | 'openverse') =>
+	search: (query: string, provider: 'serpapi' | 'ebay') =>
 		request<{ results: LibraryImageResult[]; provider: string; query: string }>(
 			'/library-images/search?q=' + encodeURIComponent(query) + '&provider=' + provider
+		),
+	ebayPhotos: (productId: string) =>
+		request<{ product_id: string; title: string; results: LibraryImageResult[] }>(
+			'/library-images/ebay-photos?product_id=' + encodeURIComponent(productId),
+			{ timeout: 35_000 }
 		),
 	async download(id: string): Promise<File> {
 		const image = await requestBlobUrl(
