@@ -11,7 +11,9 @@ from homebox_companion.core.image_library import (
     ImageLibraryError,
     download_selected_image,
     has_google_key,
+    has_serpapi_key,
     save_google_key,
+    save_serpapi_key,
     search_images,
 )
 
@@ -22,6 +24,7 @@ router = APIRouter(prefix="/library-images", dependencies=[Depends(require_auth)
 
 class ProviderKeyRequest(BaseModel):
     key: str = Field(max_length=512)
+    provider: str = Field(default="serper", pattern="^(serper|serpapi)$")
 
 
 class ImageAttachRequest(BaseModel):
@@ -31,7 +34,7 @@ class ImageAttachRequest(BaseModel):
 
 def _raise_library_error(exc: ImageLibraryError) -> HTTPException:
     message = str(exc)
-    status = 409 if "requires a Serper API key" in message else 400
+    status = 409 if "key required" in message.lower() else 400
     if "unavailable" in message.lower():
         status = 502
     return HTTPException(status_code=status, detail=message)
@@ -39,22 +42,25 @@ def _raise_library_error(exc: ImageLibraryError) -> HTTPException:
 
 @router.get("/config")
 async def library_config() -> dict[str, bool]:
-    return {"google_configured": has_google_key()}
+    return {"google_configured": has_google_key(), "serpapi_configured": has_serpapi_key()}
 
 
 @router.put("/config")
 async def update_library_config(payload: ProviderKeyRequest) -> dict[str, bool]:
     try:
-        save_google_key(payload.key)
+        if payload.provider == "serpapi":
+            save_serpapi_key(payload.key)
+        else:
+            save_google_key(payload.key)
     except ImageLibraryError as exc:
         raise _raise_library_error(exc) from exc
-    return {"google_configured": has_google_key()}
+    return {"google_configured": has_google_key(), "serpapi_configured": has_serpapi_key()}
 
 
 @router.get("/search")
 async def library_search(
     q: str = Query(min_length=1, max_length=180),
-    provider: str = Query(pattern="^(google|openverse)$"),
+    provider: str = Query(pattern="^(google|serpapi|ebay|openverse)$"),
 ) -> dict[str, Any]:
     try:
         return await search_images(q, provider)

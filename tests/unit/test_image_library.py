@@ -108,3 +108,123 @@ def test_web_download_is_reencoded_to_safe_jpeg():
         assert photo.format == "JPEG"
         assert photo.size == (32, 24)
         assert photo.mode == "RGB"
+
+
+@pytest.mark.asyncio
+async def test_serpapi_google_images_maps_search_results(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "images_results": [
+                    {
+                        "title": "Polymaker PolyDryer box",
+                        "original": "https://polymaker.com/images/polydryer.png",
+                        "thumbnail": "https://serpapi.com/searches/test/images/thumb.jpeg",
+                        "link": "https://polymaker.com/product/polydryer/",
+                        "source": "Polymaker",
+                        "position": 1,
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params):
+            assert url == "https://serpapi.com/search.json"
+            assert params["engine"] == "google_images"
+            assert params["q"] == "Polymaker PolyDryer box"
+            assert params["api_key"] == "mock-private-serpapi-key"
+            return FakeResponse()
+
+    monkeypatch.setattr(lib, "get_serpapi_key", lambda: "mock-private-serpapi-key")
+    monkeypatch.setattr(lib.httpx, "AsyncClient", FakeClient)
+    lib._RESULTS.clear()
+    result = await lib.search_images("Polymaker PolyDryer box", "serpapi")
+    assert len(result["results"]) == 1
+    item = result["results"][0]
+    assert item["source"] == "Polymaker"
+    assert item["source_url"] == "https://polymaker.com/product/polydryer/"
+    assert lib.verify_result(item["id"])["image_url"] == "https://polymaker.com/images/polydryer.png"
+    assert "mock-private-serpapi-key" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_ebay_filter_searches_only_ebay_listing_results(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "images_results": [
+                    {
+                        "title": "Used dryer box",
+                        "original": "https://i.ebayimg.com/images/g/aaaa/s-l1600.jpg",
+                        "thumbnail": "https://serpapi.com/searches/test/images/ebay.jpeg",
+                        "link": "https://www.ebay.co.uk/itm/123456789",
+                        "source": "eBay UK",
+                    },
+                    {
+                        "title": "Unrelated non-eBay source",
+                        "original": "https://example.org/photo.jpg",
+                        "link": "https://example.org/not-an-ebay-listing",
+                    },
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params):
+            assert url == "https://serpapi.com/search.json"
+            assert params["q"] == "Polymaker dryer box site:ebay.co.uk"
+            return FakeResponse()
+
+    monkeypatch.setattr(lib, "get_serpapi_key", lambda: "mock-private-serpapi-key")
+    monkeypatch.setattr(lib.httpx, "AsyncClient", FakeClient)
+    lib._RESULTS.clear()
+    result = await lib.search_images("Polymaker dryer box", "ebay")
+    assert len(result["results"]) == 1
+    assert result["results"][0]["source_url"] == "https://www.ebay.co.uk/itm/123456789"
+    assert result["results"][0]["license"] == ""
+    assert lib.verify_result(result["results"][0]["id"])["image_url"].startswith("https://i.ebayimg.com")
+
+
+def test_serpapi_key_save_preserves_existing_serper_key(monkeypatch, tmp_path):
+    settings = tmp_path / "library-image-search.yaml"
+    settings.write_text("serper_key: old-serper-key\n", encoding="utf-8")
+    monkeypatch.setattr(lib, "_DATA_FILE", settings)
+    monkeypatch.delenv("HBC_IMAGE_SEARCH_SERPAPI_KEY", raising=False)
+    lib.save_serpapi_key("new-serpapi-key")
+    assert settings.stat().st_mode & 0o777 == 0o600
+    assert lib.get_google_key() == "old-serper-key"
+    assert lib.get_serpapi_key() == "new-serpapi-key"
+    assert "new-serpapi-key" not in str(settings.stat())
+
+
+def test_serper_save_preserves_serpapi_key(monkeypatch, tmp_path):
+    settings = tmp_path / "library-image-search.yaml"
+    settings.write_text("serpapi_key: keep-serpapi-key\n", encoding="utf-8")
+    monkeypatch.setattr(lib, "_DATA_FILE", settings)
+    monkeypatch.delenv("HBC_IMAGE_SEARCH_SERPER_KEY", raising=False)
+    lib.save_google_key("second-provider-key")
+    assert lib.get_serpapi_key() == "keep-serpapi-key"
+    assert lib.get_google_key() == "second-provider-key"

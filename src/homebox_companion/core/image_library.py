@@ -1,7 +1,8 @@
 """Safe online image search and import for personal inventory cataloguing.
 
-Google Images results are provided by the Serper API (not Google scraping).
-Openverse offers freely licensed search results without an API key.
+Google Images results use Serper or SerpApi (not direct Google scraping).
+SerpApi can filter Google Images by eBay UK listing pages.
+Openverse offers openly licensed search results without an API key.
 The server signs result references to prevent arbitrary fetch URLs from clients.
 """
 
@@ -60,16 +61,86 @@ def get_google_key() -> str:
 
 
 def save_google_key(key: str) -> None:
+    """Persist an existing Serper key without removing other provider credentials."""
     if os.getenv("HBC_IMAGE_SEARCH_SERPER_KEY"):
         raise ImageLibraryError("Provider key is managed by the Docker environment.")
     if len(key) > 512:
         raise ImageLibraryError("Provider key is too long.")
     _DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, str] = {}
+    if _DATA_FILE.is_file():
+        try:
+            loaded = yaml.safe_load(_DATA_FILE.read_text(encoding="utf-8")) or {}
+            if not isinstance(loaded, dict):
+                raise ImageLibraryError("Existing image-search settings are invalid.")
+            data = {str(k): str(v) for k, v in loaded.items()}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ImageLibraryError("Unable to read existing image-search settings.") from exc
+
+    if key.strip():
+        data["serper_key"] = key.strip()
+    else:
+        data.pop("serper_key", None)
+
     descriptor, temporary = tempfile.mkstemp(prefix=".library-image-search-", dir=_DATA_FILE.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as dest:
             os.chmod(temporary, 0o600)
-            yaml.safe_dump({"serper_key": key.strip()}, dest)
+            yaml.safe_dump(data, dest)
+            dest.flush()
+            os.fsync(dest.fileno())
+        os.replace(temporary, _DATA_FILE)
+        _DATA_FILE.chmod(0o600)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    _RESULTS.clear()
+
+
+def get_serpapi_key() -> str:
+    """SerpApi (serpapi.com) is a different provider from Serper (serper.dev)."""
+    configured = os.getenv("HBC_IMAGE_SEARCH_SERPAPI_KEY", "").strip()
+    if configured:
+        return configured
+    if not _DATA_FILE.is_file():
+        return ""
+    try:
+        content = yaml.safe_load(_DATA_FILE.read_text(encoding="utf-8")) or {}
+        return str(content.get("serpapi_key", "")).strip() if isinstance(content, dict) else ""
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Unable to read image search provider settings: {}", type(exc).__name__)
+        return ""
+
+
+def has_serpapi_key() -> bool:
+    return bool(get_serpapi_key())
+
+
+def save_serpapi_key(key: str) -> None:
+    """Persist a SerpApi key while preserving any existing Serper settings."""
+    if os.getenv("HBC_IMAGE_SEARCH_SERPAPI_KEY"):
+        raise ImageLibraryError("SerpApi key is managed by the Docker environment.")
+    if len(key) > 512:
+        raise ImageLibraryError("Provider key is too long.")
+    _DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, str] = {}
+    if _DATA_FILE.is_file():
+        try:
+            loaded = yaml.safe_load(_DATA_FILE.read_text(encoding="utf-8")) or {}
+            if not isinstance(loaded, dict):
+                raise ImageLibraryError("Existing image-search settings are invalid.")
+            data = {str(k): str(v) for k, v in loaded.items()}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ImageLibraryError("Unable to read existing image-search settings.") from exc
+    if key.strip():
+        data["serpapi_key"] = key.strip()
+    else:
+        data.pop("serpapi_key", None)
+
+    descriptor, temporary = tempfile.mkstemp(prefix=".library-image-search-", dir=_DATA_FILE.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as dest:
+            os.chmod(temporary, 0o600)
+            yaml.safe_dump(data, dest)
             dest.flush()
             os.fsync(dest.fileno())
         os.replace(temporary, _DATA_FILE)
@@ -137,12 +208,12 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
     q = " ".join(query.split())
     if not q or len(q) > 180:
         raise ImageLibraryError("Enter a product name or model number (maximum 180 characters).")
-    if provider not in ("google", "openverse"):
+    if provider not in ("google", "serpapi", "ebay", "openverse"):
         raise ImageLibraryError("Unsupported image search provider.")
     if provider == "google" and not has_google_key():
-        raise ImageLibraryError(
-            "Google image search requires a Serper API key. Configure it first or select Openverse."
-        )
+        raise ImageLibraryError("Serper API key required. Configure Serper or choose another provider.")
+    if provider in ("serpapi", "ebay") and not has_serpapi_key():
+        raise ImageLibraryError("SerpApi key required. Configure SerpApi to search Google Images or eBay listings.")
 
     cache_key = (provider, q.casefold())
     cached = _RESULTS.get(cache_key)
@@ -157,6 +228,19 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
                     headers={"X-API-KEY": get_google_key(), "Content-Type": "application/json"},
                     json={"q": q, "num": 18, "gl": "gb", "hl": "en"},
                 )
+            elif provider in ("serpapi", "ebay"):
+                search_term = q + " site:ebay.co.uk" if provider == "ebay" else q
+                response = await client.get(
+                    "https://serpapi.com/search.json",
+                    params={
+                        "engine": "google_images",
+                        "q": search_term,
+                        "api_key": get_serpapi_key(),
+                        "gl": "uk",
+                        "hl": "en",
+                        "google_domain": "google.co.uk",
+                    },
+                )
             else:
                 response = await client.get(
                     "https://api.openverse.org/v1/images/",
@@ -165,11 +249,20 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
                 )
             response.raise_for_status()
             payload = response.json()
+            if provider in ("serpapi", "ebay") and payload.get("error"):
+                raise ImageLibraryError("SerpApi rejected the search. Check the API key and remaining free searches.")
+        except ImageLibraryError:
+            raise
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
             logger.warning("Image library {} search failed: {}", provider, type(exc).__name__)
             raise ImageLibraryError("Image search was unavailable. Check provider credits or retry later.") from exc
 
-    raw_results = payload.get("images", []) if provider == "google" else payload.get("results", [])
+    if provider == "google":
+        raw_results = payload.get("images", [])
+    elif provider in ("serpapi", "ebay"):
+        raw_results = payload.get("images_results", [])
+    else:
+        raw_results = payload.get("results", [])
     if not isinstance(raw_results, list):
         raise ImageLibraryError("Image provider returned an unexpected response.")
 
@@ -177,14 +270,38 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
     for index, entry in enumerate(raw_results[:40]):
         if not isinstance(entry, dict):
             continue
-        original = _valid_public_url(entry.get("imageUrl") if provider == "google" else entry.get("url"))
-        thumbnail = _valid_public_url(entry.get("thumbnailUrl") if provider == "google" else entry.get("thumbnail"))
+        if provider == "google":
+            original = _valid_public_url(entry.get("imageUrl"))
+            thumbnail = _valid_public_url(entry.get("thumbnailUrl"))
+            source_url = _valid_public_url(entry.get("link"))
+            license_name = ""
+            attribution = ""
+            original_source = entry.get("domain") or entry.get("source") or ""
+        elif provider in ("serpapi", "ebay"):
+            original = _valid_public_url(entry.get("original"))
+            thumbnail = _valid_public_url(entry.get("thumbnail"))
+            # Occasionally Google returns only a thumbnail or a non-HTTP image identifier.
+            original = original or thumbnail
+            source_url = _valid_public_url(entry.get("link"))
+            if provider == "ebay":
+                # The site-restricted search should not surface unrelated sources.
+                source_host = (urlsplit(source_url).hostname or "").lower()
+                if source_host not in ("ebay.co.uk", "ebay.com") and not source_host.endswith(
+                    (".ebay.co.uk", ".ebay.com")
+                ):
+                    continue
+            license_name = ""  # A listing's photograph is NOT automatically licensed for reuse.
+            attribution = ""
+            original_source = entry.get("source") or ""
+        else:
+            original = _valid_public_url(entry.get("url"))
+            thumbnail = _valid_public_url(entry.get("thumbnail"))
+            source_url = _valid_public_url(entry.get("foreign_landing_url"))
+            license_name = entry.get("license") or ""
+            attribution = entry.get("attribution") or ""
+            original_source = entry.get("domain") or entry.get("source") or ""
         if not original:
             continue
-        source_url = _valid_public_url(entry.get("link") if provider == "google" else entry.get("foreign_landing_url"))
-        license_name = (entry.get("license") or "") if provider == "openverse" else ""
-        attribution = (entry.get("attribution") or "") if provider == "openverse" else ""
-        original_source = entry.get("domain") or entry.get("source") or ""
         if not isinstance(original_source, str):
             original_source = ""
         preview = thumbnail or original

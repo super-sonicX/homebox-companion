@@ -12,8 +12,10 @@
 
 	let { name, manufacturer = null, modelNumber = null, onSelect }: Props = $props();
 
-	let provider = $state<'google' | 'openverse'>('openverse');
+	type ImageProvider = 'serpapi' | 'ebay' | 'google' | 'openverse';
+	let provider = $state<ImageProvider>('serpapi');
 	let googleConfigured = $state(false);
+	let serpapiConfigured = $state(false);
 	let query = $state('');
 	let results = $state<LibraryImageResult[]>([]);
 	let searching = $state(false);
@@ -31,9 +33,12 @@
 	async function initialise() {
 		query = [manufacturer, modelNumber, name].filter(Boolean).join(' ').slice(0, 180);
 		try {
-			googleConfigured = (await libraryImages.config()).google_configured;
-			provider = googleConfigured ? 'google' : 'openverse';
-			await searchImages();
+			const config = await libraryImages.config();
+			googleConfigured = config.google_configured;
+			serpapiConfigured = config.serpapi_configured;
+			provider = serpapiConfigured ? 'serpapi' : googleConfigured ? 'google' : 'serpapi';
+			if (serpapiConfigured || googleConfigured) await searchImages();
+			else showKeyInput = true;
 		} catch (ex) {
 			error = ex instanceof Error ? ex.message : 'Unable to load image-search configuration';
 		}
@@ -74,11 +79,14 @@
 		savingKey = true;
 		error = '';
 		try {
-			const config = await libraryImages.setGoogleKey(providerKey.trim());
+			const config = await libraryImages.setProviderKey(
+				provider === 'google' ? 'serper' : 'serpapi',
+				providerKey.trim()
+			);
 			googleConfigured = config.google_configured;
+			serpapiConfigured = config.serpapi_configured;
 			providerKey = '';
 			showKeyInput = false;
-			provider = 'google';
 			await searchImages();
 		} catch (ex) {
 			error = ex instanceof Error ? ex.message : 'Unable to save the provider key';
@@ -87,12 +95,16 @@
 		}
 	}
 
-	async function changeProvider(next: 'google' | 'openverse') {
+	async function changeProvider(next: ImageProvider) {
 		if (next === provider) return;
 		provider = next;
 		results = [];
 		hasSearched = false;
-		if (next === 'google' && !googleConfigured) {
+		showKeyInput = false;
+		error = '';
+		const needsKey =
+			next === 'google' ? !googleConfigured : next !== 'openverse' && !serpapiConfigured;
+		if (needsKey) {
 			showKeyInput = true;
 			return;
 		}
@@ -110,41 +122,69 @@
 		before importing.
 	</p>
 
-	<div class="flex gap-2">
+	<div class="grid grid-cols-2 gap-2">
 		<button
 			type="button"
-			class="rounded-lg px-3 py-2 text-body-sm {provider === 'google'
+			class="rounded-lg p-2 text-body-sm {provider === 'serpapi'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
-			onclick={() => changeProvider('google')}>Google Images</button
+			onclick={() => changeProvider('serpapi')}>Google Images</button
 		>
 		<button
 			type="button"
-			class="rounded-lg px-3 py-2 text-body-sm {provider === 'openverse'
+			class="rounded-lg p-2 text-body-sm {provider === 'ebay'
+				? 'bg-primary-600 text-neutral-100'
+				: 'bg-neutral-800 text-neutral-300'}"
+			onclick={() => changeProvider('ebay')}>eBay listings</button
+		>
+		<button
+			type="button"
+			class="rounded-lg p-2 text-body-sm {provider === 'google'
+				? 'bg-primary-600 text-neutral-100'
+				: 'bg-neutral-800 text-neutral-300'}"
+			onclick={() => changeProvider('google')}>Serper (existing)</button
+		>
+		<button
+			type="button"
+			class="rounded-lg p-2 text-body-sm {provider === 'openverse'
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
 			onclick={() => changeProvider('openverse')}>Openverse · Free</button
 		>
 	</div>
 
-	{#if provider === 'google' && !googleConfigured}
+	{#if (provider === 'google' && !googleConfigured) || ((provider === 'serpapi' || provider === 'ebay') && !serpapiConfigured)}
 		<div class="rounded-lg border border-neutral-700 p-3 space-y-2">
-			<p class="text-body-sm text-neutral-300">
-				Google Images results require a Serper API key. Serper advertises free trial searches. Your
-				key is stored on the Companion server.
-			</p>
-			<a
-				class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
-				href="https://serper.dev/"
-				target="_blank"
-				rel="noopener noreferrer">Get a Serper search key <ExternalLink size={14} /></a
-			>
+			{#if provider === 'google'}
+				<p class="text-body-sm text-neutral-300">
+					This legacy search uses Serper.dev, which is currently experiencing registration failures.
+					Choose Google Images above to use a separate SerpApi account instead.
+				</p>
+				<a
+					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
+					href="https://serper.dev/"
+					target="_blank"
+					rel="noopener noreferrer">Serper website <ExternalLink size={14} /></a
+				>
+			{:else}
+				<p class="text-body-sm text-neutral-300">
+					Google Images and eBay listing results use SerpApi, a different company from Serper.dev.
+					The free SerpApi plan includes 250 searches per month. The eBay tab filters image search
+					to eBay UK listings; no separate eBay API key is required.
+				</p>
+				<a
+					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
+					href="https://serpapi.com/"
+					target="_blank"
+					rel="noopener noreferrer">Create free SerpApi account <ExternalLink size={14} /></a
+				>
+			{/if}
 			{#if showKeyInput}
 				<div class="flex gap-2">
 					<input
 						type="password"
 						class="input min-w-0 flex-1"
-						placeholder="Paste Serper API key"
+						placeholder={provider === 'google' ? 'Serper API key' : 'SerpApi API key'}
 						autocomplete="off"
 						bind:value={providerKey}
 					/>
@@ -154,19 +194,24 @@
 						disabled={!providerKey.trim() || savingKey}
 						onclick={saveKey}
 					>
-						{savingKey ? 'Saving…' : 'Save'}
+						{savingKey ? 'Saving…' : 'Save key'}
 					</button>
 				</div>
 			{:else}
 				<button
 					type="button"
 					class="flex items-center gap-1 text-primary-400 text-body-sm"
-					onclick={() => (showKeyInput = true)}
-					><KeyRound size={16} /> Configure Google search</button
+					onclick={() => (showKeyInput = true)}><KeyRound size={16} /> Configure search</button
 				>
 			{/if}
 		</div>
 	{:else}
+		{#if provider === 'ebay'}
+			<p class="text-caption text-neutral-400">
+				Searching image results from eBay UK listing pages. Seller photos may be copyrighted and may
+				show used or different-condition products. Check the exact model before importing.
+			</p>
+		{/if}
 		<form
 			class="flex gap-2"
 			onsubmit={(event) => {

@@ -26,13 +26,14 @@ export interface LibraryItemDetail extends LibraryItemSummary {
 }
 
 export const libraryImages = {
-	config: () => request<{ google_configured: boolean }>('/library-images/config'),
-	setGoogleKey: (key: string) =>
-		request<{ google_configured: boolean }>('/library-images/config', {
+	config: () =>
+		request<{ google_configured: boolean; serpapi_configured: boolean }>('/library-images/config'),
+	setProviderKey: (provider: 'serper' | 'serpapi', key: string) =>
+		request<{ google_configured: boolean; serpapi_configured: boolean }>('/library-images/config', {
 			method: 'PUT',
-			body: JSON.stringify({ key }),
+			body: JSON.stringify({ provider, key }),
 		}),
-	search: (query: string, provider: 'google' | 'openverse') =>
+	search: (query: string, provider: 'google' | 'serpapi' | 'ebay' | 'openverse') =>
 		request<{ results: LibraryImageResult[]; provider: string; query: string }>(
 			'/library-images/search?q=' + encodeURIComponent(query) + '&provider=' + provider
 		),
