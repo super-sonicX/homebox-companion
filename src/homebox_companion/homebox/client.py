@@ -1298,6 +1298,7 @@ class HomeboxClient:
         filename: str,
         mime_type: str = "image/jpeg",
         attachment_type: str = "photo",
+        primary: bool = False,
     ) -> dict[str, Any]:
         """Upload an attachment (image) to an item.
 
@@ -1314,6 +1315,8 @@ class HomeboxClient:
         """
         files = {"file": (filename, file_bytes, mime_type)}
         data = {"type": attachment_type, "name": filename}
+        if primary:
+            data["primary"] = "true"
         response = await self.client.post(
             f"{self.base_url}/entities/{item_id}/attachments",
             headers=self._raw_auth_headers(token),
