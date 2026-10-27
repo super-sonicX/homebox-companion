@@ -135,7 +135,7 @@
 				? 'bg-primary-600 text-neutral-100'
 				: 'bg-neutral-800 text-neutral-300'}"
 			disabled={searching || savingKey}
-			onclick={() => changeProvider('serpapi')}>Google Images</button
+			onclick={() => changeProvider('serpapi')}>Google Images Lite</button
 		>
 		<button
 			type="button"
@@ -168,7 +168,7 @@
 			{#if provider === 'google'}
 				<p class="text-body-sm text-neutral-300">
 					This legacy search uses Serper.dev, which is currently experiencing registration failures.
-					Choose Google Images above to use a separate SerpApi account instead.
+					Choose Google Images Lite above to use a separate SerpApi account instead.
 				</p>
 				<a
 					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"
@@ -178,9 +178,9 @@
 				>
 			{:else}
 				<p class="text-body-sm text-neutral-300">
-					Google Images and eBay listing results use SerpApi, a different company from Serper.dev.
-					The free SerpApi plan includes 250 searches per month. The eBay tab filters image search
-					to eBay UK listings; no separate eBay API key is required.
+					Google Images Lite and eBay listing results use SerpApi, a different company from
+					Serper.dev. The free SerpApi plan includes 250 searches per month. The eBay tab filters
+					image search to eBay UK listings; no separate eBay API key is required.
 				</p>
 				<a
 					class="inline-flex items-center gap-1 text-primary-400 text-caption underline"

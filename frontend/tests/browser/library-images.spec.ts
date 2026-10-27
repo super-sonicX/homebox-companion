@@ -45,7 +45,7 @@ test('Review lets a catalogue photo join the gallery without replacing originals
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
 	await page.getByRole('button', { name: 'Add to gallery' }).click();
 	await expect(page.getByRole('tab', { name: 'Your Photos (2)' })).toBeVisible();
@@ -63,7 +63,7 @@ test('Review can set a selected catalogue image as the custom thumbnail', async 
 	await uploadPhoto(page);
 	await analyzePhotos(page);
 	await page.getByRole('tab', { name: 'Library Images' }).click();
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await page.getByRole('button', { name: 'Use as thumbnail' }).click();
 	await expect(page.getByText('Custom', { exact: true })).toBeVisible();
 });
@@ -117,7 +117,7 @@ test('Library tab adds a primary photo to an existing Homebox item on explicit a
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
 	await page.getByRole('button', { name: 'Use as thumbnail' }).click();
 	expect(payloads).toEqual([{ image_id: 'signed-provider-token', primary: true }]);
@@ -172,7 +172,7 @@ test('SerpApi key can be configured from Library without using an OpenAI key', a
 	await uploadPhoto(page);
 	await analyzePhotos(page);
 	await page.getByRole('tab', { name: 'Library Images' }).click();
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect(page.getByText('250 searches per month')).toBeVisible();
 	await page.getByPlaceholder('SerpApi API key').fill('mock-serpapi-secret');
 	await page.getByRole('button', { name: 'Save key' }).click();
@@ -249,11 +249,11 @@ test('opening and switching existing items never triggers search until a provide
 	).toBeVisible();
 	expect(queries).toEqual([]);
 
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
 	expect(queries).toEqual(['serpapi']);
 
-	await page.getByRole('button', { name: 'Google Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await expect.poll(() => queries.length).toBe(2);
 	expect(queries).toEqual(['serpapi', 'serpapi']);
 });

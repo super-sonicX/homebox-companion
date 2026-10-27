@@ -233,7 +233,9 @@ async def search_images(query: str, provider: str = "google") -> dict[str, Any]:
                 response = await client.get(
                     "https://serpapi.com/search.json",
                     params={
-                        "engine": "google_images",
+                        # Lite returns thumbnail, original, link, title, and source,
+                        # without the richer response data Companion does not need.
+                        "engine": "google_images_light",
                         "q": search_term,
                         "api_key": get_serpapi_key(),
                         "gl": "uk",

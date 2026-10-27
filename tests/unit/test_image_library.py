@@ -142,7 +142,7 @@ async def test_serpapi_google_images_maps_search_results(monkeypatch):
 
         async def get(self, url, params):
             assert url == "https://serpapi.com/search.json"
-            assert params["engine"] == "google_images"
+            assert params["engine"] == "google_images_light"
             assert params["q"] == "Polymaker PolyDryer box"
             assert params["api_key"] == "mock-private-serpapi-key"
             return FakeResponse()
@@ -195,6 +195,7 @@ async def test_ebay_filter_searches_only_ebay_listing_results(monkeypatch):
 
         async def get(self, url, params):
             assert url == "https://serpapi.com/search.json"
+            assert params["engine"] == "google_images_light"
             assert params["q"] == "Polymaker dryer box site:ebay.co.uk"
             return FakeResponse()
 
@@ -228,3 +229,54 @@ def test_serper_save_preserves_serpapi_key(monkeypatch, tmp_path):
     lib.save_google_key("second-provider-key")
     assert lib.get_serpapi_key() == "keep-serpapi-key"
     assert lib.get_google_key() == "second-provider-key"
+
+
+@pytest.mark.asyncio
+async def test_images_lite_uses_https_thumbnail_when_original_missing(monkeypatch):
+    """SerpApi Light results can omit original (or return x-raw-image:// for PDF images)."""
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "images_results": [
+                    {
+                        "title": "Polymaker product",
+                        "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=example",
+                        "link": "https://polymaker.com/product/",
+                        "source": "Polymaker",
+                    },
+                    {
+                        "title": "Unsupported original image reference",
+                        "original": "x-raw-image:///testimage",
+                        "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=second",
+                        "link": "https://example.com/product.pdf",
+                        "source": "PDF",
+                    },
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params):
+            assert params["engine"] == "google_images_light"
+            return FakeResponse()
+
+    monkeypatch.setattr(lib, "get_serpapi_key", lambda: "mock-private-serpapi-key")
+    monkeypatch.setattr(lib.httpx, "AsyncClient", FakeClient)
+    lib._RESULTS.clear()
+    results = (await lib.search_images("Polymaker product", "serpapi"))["results"]
+    assert len(results) == 2
+    assert results[0]["source_url"] == "https://polymaker.com/product/"
+    assert lib.verify_result(results[0]["id"])["image_url"].startswith("https://encrypted-tbn0.gstatic.com/")
+    assert lib.verify_result(results[1]["id"])["image_url"].startswith("https://encrypted-tbn0.gstatic.com/")
