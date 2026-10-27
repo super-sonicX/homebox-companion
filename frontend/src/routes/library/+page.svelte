@@ -7,7 +7,6 @@
 		Search,
 		Images,
 		LoaderCircle,
-		CheckCircle2,
 		ArrowLeft,
 		ChevronRight,
 		LayoutGrid,
@@ -15,15 +14,13 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { collectionStore } from '$lib/stores/collection.svelte';
 	import { getInitPromise } from '$lib/services/bootstrap';
-	import { showToast } from '$lib/stores/ui.svelte';
 	import { items, type BlobUrlResult } from '$lib/api/items';
 	import {
 		libraryImages,
 		type LibraryItemDetail,
 		type LibraryItemSummary,
-		type LibraryImageResult,
 	} from '$lib/api/libraryImages';
-	import LibraryImagePicker from '$lib/components/LibraryImagePicker.svelte';
+	import LibraryItemWorkspace from '$lib/components/LibraryItemWorkspace.svelte';
 	import LibraryItemThumbnail from '$lib/components/LibraryItemThumbnail.svelte';
 
 	type LibraryView = 'compact' | 'standard' | 'medium' | 'large';
@@ -45,7 +42,6 @@
 	let message = $state('');
 	let selected = $state<LibraryItemDetail | null>(null);
 	let loadingItem = $state(false);
-	let savedCount = $state(0);
 	let imageUrl = $state<string | null>(null);
 	let revokeImage: (() => void) | null = null;
 	let committedQuery = '';
@@ -197,7 +193,6 @@
 		untrack(() => {
 			detailGeneration++;
 			selected = null;
-			savedCount = 0;
 			clearDetailPreview();
 			void fetchPage(1, true);
 		});
@@ -270,7 +265,6 @@
 			const detail = await libraryImages.item(item.id);
 			if (generation !== detailGeneration) return;
 			selected = detail;
-			savedCount = 0;
 			void refreshThumbnail();
 		} catch (error) {
 			if (generation !== detailGeneration) return;
@@ -304,26 +298,26 @@
 		}
 	}
 
-	async function attachLibraryPhoto(image: LibraryImageResult, primary: boolean) {
-		const itemId = selected?.id;
-		if (!itemId) throw new Error('Select an existing inventory item first.');
-		const updated = await libraryImages.attach(itemId, image.id, primary);
-		if (selected?.id !== itemId) return;
+	function onWorkspaceUpdated(updated: LibraryItemDetail) {
+		const previous = selected;
+		if (!previous || previous.id !== updated.id) return;
 		selected = updated;
-		savedCount++;
-		if (primary) {
-			invalidateItemThumbnail(itemId);
-			inventory = inventory.map((item) =>
-				item.id === itemId ? { ...item, thumbnail_id: updated.thumbnail_id } : item
-			);
-		}
-		await refreshThumbnail();
-		showToast(
-			primary
-				? 'New primary thumbnail saved in Homebox'
-				: 'Catalogue photo added to Homebox gallery',
-			'success'
+		inventory = inventory.map((value) =>
+			value.id === updated.id
+				? {
+						...value,
+						name: updated.name,
+						description: updated.description,
+						manufacturer: updated.manufacturer,
+						model_number: updated.model_number,
+						thumbnail_id: updated.thumbnail_id,
+					}
+				: value
 		);
+		if (previous.thumbnail_id !== updated.thumbnail_id) {
+			invalidateItemThumbnail(updated.id);
+			void refreshThumbnail();
+		}
 	}
 
 	const isTiles = $derived(viewMode === 'medium' || viewMode === 'large');
@@ -354,42 +348,11 @@
 		>
 			<ArrowLeft size={16} /> Back to item search
 		</button>
-
-		<div class="rounded-xl border border-neutral-700 bg-neutral-900 p-3">
-			<div class="flex gap-3">
-				{#if imageUrl}
-					<img
-						src={imageUrl}
-						alt={selected.name}
-						class="rounded-lg object-contain size-20 bg-neutral-800"
-					/>
-				{:else}
-					<div class="flex items-center justify-center rounded-lg bg-neutral-800 size-20">
-						<Images size={26} class="text-neutral-500" />
-					</div>
-				{/if}
-				<div class="min-w-0 flex-1">
-					<h2 class="font-semibold text-neutral-100">{selected.name}</h2>
-					<p class="text-caption text-neutral-400">
-						{[selected.manufacturer, selected.model_number].filter(Boolean).join(' · ') ||
-							'No model information'}
-					</p>
-					<p class="text-caption text-neutral-500 line-clamp-2">{selected.description}</p>
-				</div>
-			</div>
-			{#if savedCount > 0}
-				<p class="mt-2 flex items-center gap-1 text-success-400 text-body-sm">
-					<CheckCircle2 size={16} />
-					{savedCount} photo{savedCount === 1 ? '' : 's'} imported this session
-				</p>
-			{/if}
-		</div>
 		{#key selected.id}
-			<LibraryImagePicker
-				name={selected.name}
-				manufacturer={selected.manufacturer}
-				modelNumber={selected.model_number}
-				onSelect={attachLibraryPhoto}
+			<LibraryItemWorkspace
+				item={selected}
+				headerImageUrl={imageUrl}
+				onUpdated={onWorkspaceUpdated}
 			/>
 		{/key}
 	{:else}

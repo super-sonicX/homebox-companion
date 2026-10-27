@@ -17,6 +17,8 @@ from homebox_companion.core.image_library import (
     save_serpapi_key,
     search_images,
 )
+from homebox_companion.core.library_gallery_order import ordered_photo_ids, save_photo_order
+from homebox_companion.homebox.relationships import item_update_payload
 
 from ..dependencies import get_gateway, require_auth
 from ..services.image_processing import run_image_processing
@@ -31,6 +33,77 @@ class ProviderKeyRequest(BaseModel):
 class ImageAttachRequest(BaseModel):
     image_id: str = Field(min_length=5, max_length=12000)
     primary: bool = False
+
+
+class ItemDetailsUpdate(BaseModel):
+    """Intentionally restricted set of writable fields to avoid changing placement/tags."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    quantity: float | None = Field(default=None, ge=0, le=100_000_000, allow_inf_nan=False)
+    manufacturer: str | None = Field(default=None, max_length=255)
+    model_number: str | None = Field(default=None, max_length=255)
+    serial_number: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=10000)
+    purchase_from: str | None = Field(default=None, max_length=255)
+    purchase_price: float | None = Field(default=None, ge=0, le=100_000_000, allow_inf_nan=False)
+    expected_updated_at: str | None = Field(default=None, max_length=100)
+
+
+class PhotoOrderUpdate(BaseModel):
+    ordered_ids: list[str] = Field(max_length=100)
+
+
+def _photo_attachments(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Include all images regardless of personal-camera or catalogue origin."""
+    result = []
+    for entry in item.get("attachments") or []:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        attachment_type = str(entry.get("type") or "photo").lower()
+        mime_type = str(entry.get("mimeType") or "").lower()
+        if attachment_type not in ("photo", "image") and not mime_type.startswith("image/"):
+            continue
+        result.append(entry)
+    return result
+
+
+def _item_payload(item: dict[str, Any], gateway: HomeboxGateway) -> dict[str, Any]:
+    images = _photo_attachments(item)
+    ids = [str(img["id"]) for img in images]
+    return {
+        "id": item.get("id"),
+        "name": item.get("name", ""),
+        "description": item.get("description", ""),
+        "quantity": item.get("quantity", 1),
+        "manufacturer": item.get("manufacturer", ""),
+        "model_number": item.get("modelNumber", ""),
+        "serial_number": item.get("serialNumber", ""),
+        "notes": item.get("notes", ""),
+        "asset_id": item.get("assetId", ""),
+        "purchase_from": item.get("purchaseFrom", ""),
+        "purchase_price": item.get("purchasePrice"),
+        "purchase_date": item.get("purchaseDate", ""),
+        "warranty_expires": item.get("warrantyExpires", ""),
+        "warranty_details": item.get("warrantyDetails", ""),
+        "updated_at": item.get("updatedAt", ""),
+        "location": (item.get("location") or {}).get("name", ""),
+        "parent": (item.get("parent") or {}).get("name", ""),
+        "tags": [str(t.get("name")) for t in (item.get("tags") or []) if isinstance(t, dict) and t.get("name")],
+        "thumbnail_id": item.get("thumbnailId") or item.get("imageId"),
+        "attachments": [
+            {
+                "id": str(x["id"]),
+                "type": x.get("type", "photo"),
+                "title": x.get("title", ""),
+                "mime_type": x.get("mimeType", ""),
+                "primary": bool(x.get("primary")) or x.get("id") == item.get("thumbnailId"),
+            }
+            for x in images
+        ],
+        "gallery_order": ordered_photo_ids(gateway.access, str(item.get("id")), ids),
+        "gallery_order_scope": "companion",
+    }
 
 
 def _raise_library_error(exc: ImageLibraryError) -> HTTPException:
@@ -182,20 +255,105 @@ async def existing_item_detail(
     item_id: str,
     gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
 ) -> dict[str, Any]:
+    """Return full item fields and existing photo-gallery metadata."""
     item = await gateway.get_item(item_id)
-    return {
-        "id": item.get("id"),
-        "name": item.get("name", ""),
-        "description": item.get("description", ""),
-        "manufacturer": item.get("manufacturer", ""),
-        "model_number": item.get("modelNumber", ""),
-        "thumbnail_id": item.get("thumbnailId") or item.get("imageId"),
-        "attachments": [
-            {"id": x.get("id"), "type": x.get("type"), "primary": bool(x.get("primary"))}
-            for x in item.get("attachments", [])
-            if isinstance(x, dict)
-        ],
+    return _item_payload(item, gateway)
+
+
+@router.put("/items/{item_id}/details")
+async def edit_existing_item(
+    item_id: str,
+    request: ItemDetailsUpdate,
+    gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
+) -> dict[str, Any]:
+    """Update common fields with a full Homebox PUT that preserves relationships/custom fields."""
+    changes = request.model_dump(exclude_unset=True, exclude={"expected_updated_at"})
+    if not changes:
+        raise HTTPException(status_code=422, detail="No fields were changed.")
+    if "name" in changes and (not changes["name"] or not str(changes["name"]).strip()):
+        raise HTTPException(status_code=422, detail="Item name cannot be empty.")
+    original = await gateway.get_item(item_id)
+    if original.get("id") != item_id:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    if (
+        request.expected_updated_at
+        and original.get("updatedAt")
+        and request.expected_updated_at != original["updatedAt"]
+    ):
+        raise HTTPException(status_code=409, detail="This item was edited elsewhere. Reload before saving.")
+    current_type = original.get("entityType") or {}
+    if isinstance(current_type, dict) and current_type.get("isLocation") is True:
+        raise HTTPException(status_code=400, detail="This editor is for inventory items, not locations.")
+    # Homebox PUT replaces an entire entity: retain parent, location override,
+    # tags, warranties and user-defined fields rather than sending only the changed keys.
+    body = item_update_payload(original)
+    mapping = {
+        "name": "name",
+        "description": "description",
+        "quantity": "quantity",
+        "manufacturer": "manufacturer",
+        "model_number": "modelNumber",
+        "serial_number": "serialNumber",
+        "notes": "notes",
+        "purchase_from": "purchaseFrom",
+        "purchase_price": "purchasePrice",
     }
+    for key, value in changes.items():
+        body[mapping[key]] = value
+    await gateway.update_item(item_id, body)
+    return _item_payload(await gateway.get_item(item_id), gateway)
+
+
+def _image_or_404(item: dict[str, Any], attachment_id: str) -> dict[str, Any]:
+    match = next((x for x in _photo_attachments(item) if str(x["id"]) == attachment_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="This photograph is not attached to the item.")
+    return match
+
+
+@router.put("/items/{item_id}/photos/order")
+async def update_photo_order(
+    item_id: str,
+    request: PhotoOrderUpdate,
+    gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
+) -> dict[str, Any]:
+    """Store presentation order on Companion, since Homebox exposes no native order API."""
+    item = await gateway.get_item(item_id)
+    ids = [str(x["id"]) for x in _photo_attachments(item)]
+    proposed = request.ordered_ids
+    if len(proposed) != len(set(proposed)) or set(proposed) != set(ids):
+        raise HTTPException(status_code=409, detail="The photographs have changed; reload before reordering.")
+    save_photo_order(gateway.access, item_id, proposed)
+    return _item_payload(item, gateway)
+
+
+@router.put("/items/{item_id}/photos/{attachment_id}/primary")
+async def set_existing_photo_primary(
+    item_id: str,
+    attachment_id: str,
+    gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
+) -> dict[str, Any]:
+    """Set an existing personal/catalogue photo as Homebox's primary image."""
+    original = await gateway.get_item(item_id)
+    image = _image_or_404(original, attachment_id)
+    if image.get("primary") is not True:
+        # Preserve existing caption/type because Homebox uses a PUT endpoint.
+        changes = {"primary": True, "type": image.get("type") or "photo", "title": image.get("title") or ""}
+        await gateway.update_attachment(item_id, attachment_id, changes)
+    return _item_payload(await gateway.get_item(item_id), gateway)
+
+
+@router.delete("/items/{item_id}/photos/{attachment_id}")
+async def remove_existing_photo(
+    item_id: str,
+    attachment_id: str,
+    gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
+) -> dict[str, Any]:
+    """Remove ONLY the explicitly selected image; never delete the inventory item."""
+    original = await gateway.get_item(item_id)
+    _image_or_404(original, attachment_id)
+    await gateway.delete_attachment(item_id, attachment_id)
+    return _item_payload(await gateway.get_item(item_id), gateway)
 
 
 @router.post("/items/{item_id}/attach")
@@ -224,16 +382,4 @@ async def attach_image_to_existing_item(
         primary=request.primary,
     )
     item = await gateway.get_item(item_id)
-    return {
-        "id": item.get("id"),
-        "name": item.get("name"),
-        "description": item.get("description", ""),
-        "manufacturer": item.get("manufacturer", ""),
-        "model_number": item.get("modelNumber", ""),
-        "thumbnail_id": item.get("thumbnailId") or item.get("imageId"),
-        "attachments": [
-            {"id": x.get("id"), "type": x.get("type"), "primary": bool(x.get("primary"))}
-            for x in item.get("attachments", [])
-            if isinstance(x, dict)
-        ],
-    }
+    return _item_payload(item, gateway)

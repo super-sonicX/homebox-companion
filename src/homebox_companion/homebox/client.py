@@ -1326,6 +1326,30 @@ class HomeboxClient:
         self._ensure_success(response, "Upload attachment")
         return response.json()
 
+    async def update_attachment(
+        self,
+        token: str,
+        item_id: str,
+        attachment_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update existing Homebox attachment metadata / primary photo status."""
+        response = await self.client.put(
+            f"{self.base_url}/entities/{item_id}/attachments/{attachment_id}",
+            headers=self._auth_headers(token, content_type="application/json"),
+            json=changes,
+        )
+        self._ensure_success(response, "Update attachment")
+        return response.json()
+
+    async def delete_attachment(self, token: str, item_id: str, attachment_id: str) -> None:
+        """Permanently delete the selected attachment from one Homebox item."""
+        response = await self.client.delete(
+            f"{self.base_url}/entities/{item_id}/attachments/{attachment_id}",
+            headers=self._auth_headers(token),
+        )
+        self._ensure_success(response, "Delete attachment")
+
     async def upload_attachment_typed(
         self,
         token: str,

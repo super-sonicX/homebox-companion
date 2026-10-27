@@ -116,6 +116,8 @@ test('Library tab adds a primary photo to an existing Homebox item on explicit a
 	});
 	await page.goto('/library');
 	await page.getByRole('button', { name: /Storage box/ }).click();
+	await expect(page.getByText('Your item photographs (0)')).toBeVisible();
+	await page.getByRole('button', { name: 'Find additional library images' }).click();
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
@@ -123,7 +125,7 @@ test('Library tab adds a primary photo to an existing Homebox item on explicit a
 	await expect(page.getByText('Test catalogue image')).toBeVisible();
 	await page.getByRole('button', { name: 'Use as thumbnail' }).click();
 	expect(payloads).toEqual([{ image_id: 'signed-provider-token', primary: true }]);
-	await expect(page.getByText(/1 photo imported this session/)).toBeVisible();
+	await expect(page.getByText(/1 catalogue photograph added this session/)).toBeVisible();
 });
 
 test('eBay image results are selected explicitly on the Review page', async ({ page, api }) => {
@@ -233,6 +235,8 @@ test('opening and switching existing items never triggers search until a provide
 
 	await page.goto('/library');
 	await page.getByRole('button', { name: /Polymaker dryer/ }).click();
+	await expect(page.getByText('Your item photographs (0)')).toBeVisible();
+	await page.getByRole('button', { name: 'Find additional library images' }).click();
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();
@@ -240,6 +244,8 @@ test('opening and switching existing items never triggers search until a provide
 
 	await page.getByRole('button', { name: 'Back to item search' }).click();
 	await page.getByRole('button', { name: /ESP32 board/ }).click();
+	await expect(page.getByText('Your item photographs (0)')).toBeVisible();
+	await page.getByRole('button', { name: 'Find additional library images' }).click();
 	await expect(
 		page.getByText('Choose an image provider above to search.', { exact: false })
 	).toBeVisible();

@@ -22,8 +22,44 @@ export interface LibraryItemSummary {
 	thumbnail_id: string | null;
 }
 
+export interface LibraryPhoto {
+	id: string;
+	type: string;
+	title: string;
+	mime_type: string;
+	primary: boolean;
+}
+
 export interface LibraryItemDetail extends LibraryItemSummary {
-	attachments: Array<{ id: string; type: string; primary: boolean }>;
+	quantity: number;
+	serial_number: string;
+	notes: string;
+	asset_id: string;
+	purchase_from: string;
+	purchase_price: number | null;
+	purchase_date: string;
+	warranty_expires: string;
+	warranty_details: string;
+	updated_at: string;
+	location: string;
+	parent: string;
+	tags: string[];
+	attachments: LibraryPhoto[];
+	gallery_order: string[];
+	gallery_order_scope: 'companion';
+}
+
+export interface LibraryItemEdits {
+	name: string;
+	description: string;
+	quantity: number;
+	manufacturer: string;
+	model_number: string;
+	serial_number: string;
+	notes: string;
+	purchase_from: string;
+	purchase_price: number | null;
+	expected_updated_at?: string;
 }
 
 export const libraryImages = {
@@ -81,6 +117,33 @@ export const libraryImages = {
 		),
 	item: (id: string) =>
 		request<LibraryItemDetail>('/library-images/items/' + encodeURIComponent(id)),
+	editDetails: (id: string, values: LibraryItemEdits) =>
+		request<LibraryItemDetail>('/library-images/items/' + encodeURIComponent(id) + '/details', {
+			method: 'PUT',
+			body: JSON.stringify(values),
+		}),
+	setPrimary: (id: string, photoId: string) =>
+		request<LibraryItemDetail>(
+			'/library-images/items/' +
+				encodeURIComponent(id) +
+				'/photos/' +
+				encodeURIComponent(photoId) +
+				'/primary',
+			{ method: 'PUT' }
+		),
+	deletePhoto: (id: string, photoId: string) =>
+		request<LibraryItemDetail>(
+			'/library-images/items/' + encodeURIComponent(id) + '/photos/' + encodeURIComponent(photoId),
+			{ method: 'DELETE' }
+		),
+	reorderPhotos: (id: string, orderedIds: string[]) =>
+		request<LibraryItemDetail>(
+			'/library-images/items/' + encodeURIComponent(id) + '/photos/order',
+			{
+				method: 'PUT',
+				body: JSON.stringify({ ordered_ids: orderedIds }),
+			}
+		),
 	attach: (id: string, imageId: string, primary: boolean) =>
 		request<LibraryItemDetail>('/library-images/items/' + encodeURIComponent(id) + '/attach', {
 			method: 'POST',

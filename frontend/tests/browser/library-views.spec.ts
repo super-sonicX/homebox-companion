@@ -204,9 +204,10 @@ test('returning after a primary-photo change requests the new preview and preser
 	await expect(page.locator('[data-library-item]')).toHaveCount(1);
 	await expect.poll(() => photoRequests.length).toBeGreaterThan(0);
 	await page.locator('[data-library-item="item-1"]').click();
+	await page.getByRole('button', { name: 'Find additional library images' }).click();
 	await page.getByRole('button', { name: 'Google Images Lite' }).click();
 	await page.getByRole('button', { name: 'Use as thumbnail' }).click();
-	await expect(page.getByText('1 photo imported this session')).toBeVisible();
+	await expect(page.getByText('1 catalogue photograph added this session')).toBeVisible();
 	await page.getByRole('button', { name: 'Back to item search' }).click();
 	await expect(page.locator('[data-library-item]')).toHaveCount(1);
 	await expect.poll(() => photoRequests.includes('updated-primary')).toBe(true);
