@@ -485,17 +485,21 @@
 						{/if}
 						<span class={isTiles ? 'block w-full min-w-0' : 'min-w-0 flex-1'}>
 							<span
-								class={isTiles ? 'block line-clamp-2 font-medium' : 'block truncate font-medium'}
+								data-library-item-title
+								class={isTiles
+									? 'block line-clamp-2 font-medium text-[calc(1em-2pt)]'
+									: 'block truncate font-medium text-[calc(1em-2pt)]'}
 							>
 								{item.name}
 							</span>
-							<span
-								class={isTiles
-									? 'block line-clamp-2 text-caption text-neutral-500'
-									: 'block truncate text-caption text-neutral-500'}
-							>
-								{item.model_number || item.description || 'Select to search product photos'}
-							</span>
+							{#if !isTiles}
+								<span
+									data-library-item-description
+									class="block truncate text-caption text-neutral-500"
+								>
+									{item.model_number || item.description || 'Select to search product photos'}
+								</span>
+							{/if}
 						</span>
 						{#if !isTiles}<ChevronRight size={16} class="shrink-0 text-neutral-500" />{/if}
 					</button>

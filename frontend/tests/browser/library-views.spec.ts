@@ -255,3 +255,44 @@ test('medium tile view uses two columns on a narrow phone screen', async ({ page
 		.evaluate((element) => Math.round(element.getBoundingClientRect().height));
 	expect(firstImageSize).toBe(112);
 });
+
+test('Library title is two points smaller in all view modes; tiles show only the title', async ({
+	page,
+	api,
+}) => {
+	inventoryApi(api, 3);
+	await page.goto('/library');
+
+	const mode = page.getByRole('combobox', { name: 'Library view' });
+	for (const view of ['compact', 'standard', 'medium', 'large'] as const) {
+		await mode.selectOption(view);
+		const card = page.locator('[data-library-item="item-1"]');
+		await expect(card).toBeVisible();
+		const title = card.locator('[data-library-item-title]');
+		await expect(title).toHaveText('Inventory item 1');
+		const sizes = await title.evaluate((node) => {
+			const card = node.closest('[data-library-item]');
+			if (!card) throw new Error('Missing library item card');
+			return {
+				before: parseFloat(getComputedStyle(card).fontSize),
+				after: parseFloat(getComputedStyle(node).fontSize),
+			};
+		});
+		// CSS points: 2pt = 2 * 96 / 72 = approximately 2.667 CSS pixels.
+		expect(sizes.before - sizes.after).toBeCloseTo((2 * 96) / 72, 1);
+
+		const secondary = card.locator('[data-library-item-description]');
+		if (view === 'compact' || view === 'standard') {
+			await expect(secondary).toHaveText('Model 1');
+		} else {
+			await expect(secondary).toHaveCount(0);
+			await expect(card).toHaveText('Inventory item 1');
+		}
+	}
+	// Listing/view changes must never trigger a SerpApi search.
+	expect(
+		api.requests.filter(
+			(request) => new URL(request.url()).pathname === '/api/library-images/search'
+		)
+	).toHaveLength(0);
+});
