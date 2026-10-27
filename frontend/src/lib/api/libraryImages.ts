@@ -56,9 +56,28 @@ export const libraryImages = {
 			image.revoke();
 		}
 	},
-	items: (q: string) =>
-		request<{ items: LibraryItemSummary[]; total: number }>(
-			'/library-images/items?q=' + encodeURIComponent(q)
+	items: (q: string, page = 1, pageSize = 40, signal?: AbortSignal) =>
+		request<{
+			items: LibraryItemSummary[];
+			total: number;
+			page: number;
+			has_more: boolean;
+		}>(
+			'/library-images/items?q=' +
+				encodeURIComponent(q) +
+				'&page=' +
+				page +
+				'&page_size=' +
+				pageSize,
+			{ signal }
+		),
+	thumbnail: (itemId: string, attachmentId: string, signal?: AbortSignal) =>
+		requestBlobUrl(
+			'/library-images/items/' +
+				encodeURIComponent(itemId) +
+				'/thumbnail?attachment_id=' +
+				encodeURIComponent(attachmentId),
+			{ signal, timeout: 30_000 }
 		),
 	item: (id: string) =>
 		request<LibraryItemDetail>('/library-images/items/' + encodeURIComponent(id)),

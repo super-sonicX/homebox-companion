@@ -1,9 +1,11 @@
 """Authenticated library-image search and attachment import endpoints."""
 
+from io import BytesIO
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from homebox_companion import HomeboxGateway
@@ -17,6 +19,7 @@ from homebox_companion.core.image_library import (
 )
 
 from ..dependencies import get_gateway, require_auth
+from ..services.image_processing import run_image_processing
 
 router = APIRouter(prefix="/library-images", dependencies=[Depends(require_auth)])
 
@@ -91,10 +94,18 @@ async def library_download(image_id: str = Query(min_length=5, max_length=12000)
 async def search_existing_items(
     gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
     q: str = Query(default="", max_length=120),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=40, ge=1, le=50),
 ) -> dict[str, Any]:
-    response = await gateway.list_items(query=q.strip() or None, page_size=50, page=1)
+    """Return one bounded Homebox page and its thumbnail references.
+
+    Homebox may include location/container entities in its total; only regular
+    inventory items are rendered, but paging follows Homebox's raw result set.
+    """
+    response = await gateway.list_items(query=q.strip() or None, page=page, page_size=page_size)
+    raw_items = response.get("items", [])
     items = []
-    for item in response.get("items", []):
+    for item in raw_items:
         typ = item.get("entityType") or {}
         if isinstance(typ, dict) and typ.get("isLocation") is True:
             continue
@@ -108,7 +119,62 @@ async def search_existing_items(
                 "thumbnail_id": item.get("thumbnailId") or item.get("imageId"),
             }
         )
-    return {"items": items, "total": response.get("total", len(items))}
+    total = response.get("total")
+    if not isinstance(total, int) or total < 0:
+        total = (page - 1) * page_size + len(raw_items)
+        has_more = len(raw_items) == page_size
+    else:
+        has_more = page * page_size < total and bool(raw_items)
+    return {"items": items, "total": total, "page": page, "has_more": has_more}
+
+
+def _make_library_preview(content: bytes) -> bytes:
+    """Build a small inventory preview instead of sending original photographs to the browser."""
+    if len(content) > 20 * 1024 * 1024:
+        raise ValueError("Thumbnail source exceeds 20 MiB")
+    with Image.open(BytesIO(content)) as source:
+        if source.width * source.height > 24_000_000:
+            raise ValueError("Image has too many pixels")
+        source.seek(0)
+        image = ImageOps.exif_transpose(source)
+        image.thumbnail((320, 320), Image.Resampling.LANCZOS)
+        if image.mode == "RGB":
+            rgb = image
+        elif image.mode in {"RGBA", "LA", "P"}:
+            rgba = image.convert("RGBA")
+            rgb = Image.new("RGB", rgba.size, "white")
+            rgb.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            rgb = image.convert("RGB")
+        buffer = BytesIO()
+        rgb.save(buffer, format="JPEG", quality=78, optimize=True)
+        return buffer.getvalue()
+
+
+@router.get("/items/{item_id}/thumbnail")
+async def existing_item_thumbnail(
+    item_id: str,
+    gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
+    attachment_id: str = Query(min_length=1, max_length=128),
+) -> Response:
+    """Authenticated preview of an existing Homebox primary photo.
+
+    The selected attachment ID comes from the item-list response; access to its
+    bytes remains scoped to the requesting Homebox user/collection.
+    """
+    try:
+        content, _ = await gateway.get_attachment(item_id, attachment_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Item thumbnail not found.") from exc
+    try:
+        preview = await run_image_processing(_make_library_preview, content)
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Unable to process item thumbnail.") from exc
+    return Response(
+        preview,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/items/{item_id}")
@@ -161,6 +227,9 @@ async def attach_image_to_existing_item(
     return {
         "id": item.get("id"),
         "name": item.get("name"),
+        "description": item.get("description", ""),
+        "manufacturer": item.get("manufacturer", ""),
+        "model_number": item.get("modelNumber", ""),
         "thumbnail_id": item.get("thumbnailId") or item.get("imageId"),
         "attachments": [
             {"id": x.get("id"), "type": x.get("type"), "primary": bool(x.get("primary"))}
