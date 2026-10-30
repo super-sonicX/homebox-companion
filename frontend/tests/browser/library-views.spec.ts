@@ -116,6 +116,75 @@ test('Load more retrieves successive 40-item pages without duplicates or image s
 	).toHaveLength(0);
 });
 
+test('sorts the entire paginated inventory immediately and remembers the choice', async ({
+	page,
+	api,
+}) => {
+	const catalog = Array.from({ length: 90 }, (_, i) => ({
+		...item(i + 1),
+		name: 'Widget ' + String(i + 1).padStart(3, '0'),
+	}));
+	api.on('GET', '/api/library-images/items', (request) => {
+		const url = new URL(request.url());
+		const sort = url.searchParams.get('sort');
+		const pageNumber = Number(url.searchParams.get('page'));
+		const pageSize = Number(url.searchParams.get('page_size'));
+		expect(pageSize).toBe(40);
+		expect(['newest', 'oldest', 'name_asc', 'name_desc']).toContain(sort);
+		const ordered = [...catalog];
+		if (sort === 'newest' || sort === 'name_desc') ordered.reverse();
+		const offset = (pageNumber - 1) * pageSize;
+		return json({
+			items: ordered.slice(offset, offset + pageSize),
+			page: pageNumber,
+			total: catalog.length,
+			has_more: offset + pageSize < catalog.length,
+		});
+	});
+	await page.goto('/library');
+	const mode = page.getByRole('combobox', { name: 'Library sort' });
+	const rows = page.locator('[data-library-item]');
+	await expect(mode).toHaveValue('newest');
+	await expect(rows).toHaveCount(40);
+	await expect(rows.first()).toHaveAttribute('data-library-item', 'item-90');
+	await page.getByRole('button', { name: 'Load more items' }).click();
+	await expect(rows).toHaveCount(80);
+	await expect(rows.nth(40)).toHaveAttribute('data-library-item', 'item-50');
+	// Changing the dropdown immediately fetches page 1 in the new order.
+	await mode.selectOption('name_asc');
+	await expect(rows).toHaveCount(40);
+	await expect(rows.first()).toHaveAttribute('data-library-item', 'item-1');
+	await expect(rows.last()).toHaveAttribute('data-library-item', 'item-40');
+	await page.getByRole('button', { name: 'Load more items' }).click();
+	await expect(rows.nth(40)).toHaveAttribute('data-library-item', 'item-41');
+	await mode.selectOption('name_desc');
+	await expect(rows.first()).toHaveAttribute('data-library-item', 'item-90');
+	await mode.selectOption('oldest');
+	await expect(rows.first()).toHaveAttribute('data-library-item', 'item-1');
+	expect(await page.evaluate(() => localStorage.getItem('hbc_library_sort_v1'))).toBe('oldest');
+	await page.reload();
+	await expect(mode).toHaveValue('oldest');
+	await expect(rows.first()).toHaveAttribute('data-library-item', 'item-1');
+	const listRequests = api.requests
+		.filter((request) => new URL(request.url()).pathname === '/api/library-images/items')
+		.map((request) => {
+			const url = new URL(request.url());
+			return [url.searchParams.get('sort'), url.searchParams.get('page')];
+		});
+	expect(listRequests).toEqual([
+		['newest', '1'],
+		['newest', '2'],
+		['name_asc', '1'],
+		['name_asc', '2'],
+		['name_desc', '1'],
+		['oldest', '1'],
+		['oldest', '1'],
+	]);
+	expect(
+		api.requests.filter((req) => req.url().includes('/api/library-images/search'))
+	).toHaveLength(0);
+});
+
 test('thumbnails are lazy loaded with at most four simultaneous requests and no placeholders shifting layout', async ({
 	page,
 	api,

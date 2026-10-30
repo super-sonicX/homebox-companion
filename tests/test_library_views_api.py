@@ -3,11 +3,12 @@
 from io import BytesIO
 from typing import cast
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from PIL import Image
 
-from homebox_companion import HomeboxGateway
+from homebox_companion import HomeboxClient, HomeboxGateway
 from server.api.library_images import (
     _make_library_preview,
     existing_item_thumbnail,
@@ -51,10 +52,18 @@ class FakeGateway:
 @pytest.mark.asyncio
 async def test_pages_are_bounded_and_exclude_location_without_losing_pagination():
     gateway = FakeGateway()
-    first = await search_existing_items(cast(HomeboxGateway, gateway), q="   tools   ", page=1, page_size=40)
-    second = await search_existing_items(cast(HomeboxGateway, gateway), q="tools", page=2, page_size=40)
-    third = await search_existing_items(cast(HomeboxGateway, gateway), q="tools", page=3, page_size=40)
-    assert gateway.calls[0] == {"query": "tools", "page": 1, "page_size": 40}
+    first = await search_existing_items(
+        cast(HomeboxGateway, gateway), q="   tools   ", page=1, page_size=40, sort="newest"
+    )
+    second = await search_existing_items(cast(HomeboxGateway, gateway), q="tools", page=2, page_size=40, sort="newest")
+    third = await search_existing_items(cast(HomeboxGateway, gateway), q="tools", page=3, page_size=40, sort="newest")
+    assert gateway.calls[0] == {
+        "query": "tools",
+        "page": 1,
+        "page_size": 40,
+        "order_by": "createdAt",
+        "order_direction": "desc",
+    }
     assert first["total"] == 83
     assert first["page"] == 1
     assert len(first["items"]) == 39  # excludes a location
@@ -63,6 +72,53 @@ async def test_pages_are_bounded_and_exclude_location_without_losing_pagination(
     assert first["items"][2]["thumbnail_id"] == "thumb-3"
     assert len(second["items"]) == 40 and second["has_more"] is True
     assert len(third["items"]) == 3 and third["has_more"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sort", "order_by", "direction"),
+    [
+        ("newest", "createdAt", "desc"),
+        ("oldest", "createdAt", "asc"),
+        ("name_asc", "name", "asc"),
+        ("name_desc", "name", "desc"),
+    ],
+)
+async def test_library_sort_is_forwarded_to_homebox_before_pagination(sort, order_by, direction):
+    gateway = FakeGateway()
+    page = await search_existing_items(cast(HomeboxGateway, gateway), q="", page=2, page_size=40, sort=sort)
+    assert page["page"] == 2
+    assert gateway.calls == [
+        {
+            "query": None,
+            "page": 2,
+            "page_size": 40,
+            "order_by": order_by,
+            "order_direction": direction,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_homebox_transport_sends_sort_fields_to_entities_endpoint():
+    requests = []
+
+    def mock_entities(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"items": [], "total": 0, "page": 1})
+
+    transport = httpx.MockTransport(mock_entities)
+    async with HomeboxClient(base_url="http://homebox.example/api/v1", transport=transport) as client:
+        await client.list_items("test-token", page=1, page_size=40, order_by="createdAt", order_direction="desc")
+
+    assert len(requests) == 1
+    assert requests[0].url.path.endswith("/entities")
+    assert dict(requests[0].url.params) == {
+        "page": "1",
+        "pageSize": "40",
+        "orderBy": "createdAt",
+        "orderDirection": "desc",
+    }
 
 
 def _picture(width: int, height: int, colour: str, format: str = "PNG") -> bytes:

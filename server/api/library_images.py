@@ -1,7 +1,7 @@
 """Authenticated library-image search and attachment import endpoints."""
 
 from io import BytesIO
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -169,13 +169,26 @@ async def search_existing_items(
     q: str = Query(default="", max_length=120),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=40, ge=1, le=50),
+    sort: Literal["newest", "oldest", "name_asc", "name_desc"] = Query(default="newest"),
 ) -> dict[str, Any]:
     """Return one bounded Homebox page and its thumbnail references.
 
     Homebox may include location/container entities in its total; only regular
     inventory items are rendered, but paging follows Homebox's raw result set.
     """
-    response = await gateway.list_items(query=q.strip() or None, page=page, page_size=page_size)
+    order_by, direction = {
+        "newest": ("createdAt", "desc"),
+        "oldest": ("createdAt", "asc"),
+        "name_asc": ("name", "asc"),
+        "name_desc": ("name", "desc"),
+    }[sort]
+    response = await gateway.list_items(
+        query=q.strip() or None,
+        page=page,
+        page_size=page_size,
+        order_by=order_by,
+        order_direction=direction,
+    )
     raw_items = response.get("items", [])
     items = []
     for item in raw_items:

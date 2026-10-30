@@ -13,6 +13,8 @@ export interface LibraryImageResult {
 	product_id?: string | null;
 }
 
+export type LibrarySort = 'newest' | 'oldest' | 'name_asc' | 'name_desc';
+
 export interface LibraryItemSummary {
 	id: string;
 	name: string;
@@ -92,7 +94,7 @@ export const libraryImages = {
 			image.revoke();
 		}
 	},
-	items: (q: string, page = 1, pageSize = 40, signal?: AbortSignal) =>
+	items: (q: string, page = 1, pageSize = 40, sort: LibrarySort = 'newest', signal?: AbortSignal) =>
 		request<{
 			items: LibraryItemSummary[];
 			total: number;
@@ -104,7 +106,9 @@ export const libraryImages = {
 				'&page=' +
 				page +
 				'&page_size=' +
-				pageSize,
+				pageSize +
+				'&sort=' +
+				encodeURIComponent(sort),
 			{ signal }
 		),
 	thumbnail: (itemId: string, attachmentId: string, signal?: AbortSignal) =>
