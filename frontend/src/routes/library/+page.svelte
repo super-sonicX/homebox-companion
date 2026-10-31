@@ -10,6 +10,7 @@
 		ArrowLeft,
 		ChevronRight,
 		LayoutGrid,
+		ArrowDownUp,
 	} from '@lucide/svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { collectionStore } from '$lib/stores/collection.svelte';
@@ -19,6 +20,7 @@
 		libraryImages,
 		type LibraryItemDetail,
 		type LibraryItemSummary,
+		type LibrarySort,
 	} from '$lib/api/libraryImages';
 	import LibraryItemWorkspace from '$lib/components/LibraryItemWorkspace.svelte';
 	import LibraryItemThumbnail from '$lib/components/LibraryItemThumbnail.svelte';
@@ -26,12 +28,15 @@
 	type LibraryView = 'compact' | 'standard' | 'medium' | 'large';
 
 	const VIEW_STORAGE_KEY = 'hbc_library_view_v1';
+	const SORT_STORAGE_KEY = 'hbc_library_sort_v1';
+	const SORT_MODES: readonly LibrarySort[] = ['newest', 'oldest', 'name_asc', 'name_desc'];
 	const VIEWS: readonly LibraryView[] = ['compact', 'standard', 'medium', 'large'];
 	const PAGE_SIZE = 40;
 	const MAX_THUMB_CONCURRENCY = 4;
 	const MAX_THUMB_CACHE = 150;
 
 	let viewMode = $state<LibraryView>('standard');
+	let sortMode = $state<LibrarySort>('newest');
 	let ready = $state(false);
 	let query = $state('');
 	let inventory = $state<LibraryItemSummary[]>([]);
@@ -162,6 +167,18 @@
 		}
 	}
 
+	function setSortMode(next: LibrarySort) {
+		if (!SORT_MODES.includes(next) || next === sortMode) return;
+		sortMode = next;
+		try {
+			localStorage.setItem(SORT_STORAGE_KEY, next);
+		} catch {
+			// Storage can be disabled; keep the selected sort for this session.
+		}
+		// Sorting is server-side: reset to page one, not just the loaded items.
+		void fetchPage(1, true);
+	}
+
 	function clearDetailPreview() {
 		detailImageGeneration++;
 		revokeImage?.();
@@ -173,6 +190,8 @@
 		try {
 			const stored = localStorage.getItem(VIEW_STORAGE_KEY);
 			if (VIEWS.includes(stored as LibraryView)) viewMode = stored as LibraryView;
+			const savedSort = localStorage.getItem(SORT_STORAGE_KEY);
+			if (SORT_MODES.includes(savedSort as LibrarySort)) sortMode = savedSort as LibrarySort;
 		} catch {
 			// Use the default Standard list where localStorage is unavailable.
 		}
@@ -233,6 +252,7 @@
 				committedQuery,
 				pageNumber,
 				PAGE_SIZE,
+				sortMode,
 				controller?.signal
 			);
 			if (generation !== listGeneration || controller?.signal.aborted) return;
@@ -389,6 +409,22 @@
 				Showing {inventory.length} item{inventory.length === 1 ? '' : 's'}
 				{#if total > inventory.length}<span> · {total} matching Homebox records</span>{/if}
 			</p>
+			<div class="flex items-center gap-2">
+				<ArrowDownUp size={16} class="text-neutral-400" aria-hidden="true" />
+				<label for="library-sort-mode" class="text-caption text-neutral-300">Sort</label>
+				<select
+					id="library-sort-mode"
+					aria-label="Library sort"
+					class="rounded-lg border border-neutral-600 bg-neutral-800 px-2 py-1.5 text-body-sm text-neutral-100"
+					value={sortMode}
+					onchange={(event) => setSortMode(event.currentTarget.value as LibrarySort)}
+				>
+					<option value="newest">Newest first</option>
+					<option value="oldest">Oldest first</option>
+					<option value="name_asc">Name A–Z</option>
+					<option value="name_desc">Name Z–A</option>
+				</select>
+			</div>
 			<div class="flex items-center gap-2">
 				<LayoutGrid size={16} class="text-neutral-400" aria-hidden="true" />
 				<label for="library-display-mode" class="text-caption text-neutral-300">View</label>

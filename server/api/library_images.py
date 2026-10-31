@@ -1,7 +1,8 @@
 """Authenticated library-image search and attachment import endpoints."""
 
+import re
 from io import BytesIO
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -163,19 +164,114 @@ async def library_download(image_id: str = Query(min_length=5, max_length=12000)
     )
 
 
+# Older Homebox releases accept orderBy but ignore orderDirection. A reversed
+# page from the API is not a correctly sorted page, so reverse the complete
+# result set before slicing it for these two legacy modes.
+_LEGACY_SORT_PAGE_SIZE = 50
+_LEGACY_MAX_SORT_ITEMS = 10_000
+
+
+async def _requires_legacy_reverse_sort(gateway: HomeboxGateway, sort: str) -> bool:
+    if sort not in ("oldest", "name_desc"):
+        return False
+    try:
+        version = await gateway.get_version()
+    except Exception as exc:
+        # Authentication failures and unavailable servers should not be masked
+        # by returning a misleading sort result.
+        from homebox_companion import HomeboxAuthError
+        from homebox_companion.core import HomeboxCompanionError
+
+        if isinstance(exc, HomeboxAuthError):
+            raise
+        if not isinstance(exc, HomeboxCompanionError):
+            raise
+        version = None
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", version or "")
+    return not (match and tuple(map(int, match.groups())) >= (0, 27, 0))
+
+
+async def _reverse_legacy_sort(
+    gateway: HomeboxGateway,
+    *,
+    query: str | None,
+    order_by: str,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
+    """Reverse the complete 0.26.x result, not only the requested page.
+
+    Legacy Homebox sorts createdAt newest-first and names A-Z, even when the
+    opposite direction is requested. Retaining the backend's own collation,
+    then reversing its ordered rows, avoids inconsistent pagination and does
+    not require the summary response to expose createdAt.
+    """
+    all_items: list[dict[str, Any]] = []
+    total = 0
+    for legacy_page in range(1, _LEGACY_MAX_SORT_ITEMS // _LEGACY_SORT_PAGE_SIZE + 2):
+        response = await gateway.list_items(
+            query=query,
+            page=legacy_page,
+            page_size=_LEGACY_SORT_PAGE_SIZE,
+            order_by=order_by,
+        )
+        batch = response.get("items") or []
+        total_value = response.get("total")
+        if isinstance(total_value, int) and total_value >= 0:
+            total = total_value
+            if total > _LEGACY_MAX_SORT_ITEMS:
+                raise HTTPException(422, "Legacy Homebox sort exceeds the supported 10,000-entity limit.")
+        if not batch:
+            break
+        all_items.extend(batch)
+        if len(all_items) > _LEGACY_MAX_SORT_ITEMS:
+            raise HTTPException(422, "Legacy Homebox sort exceeds the supported 10,000-entity limit.")
+        if (total and len(all_items) >= total) or len(batch) < _LEGACY_SORT_PAGE_SIZE:
+            break
+    all_items.reverse()
+    offset = (page - 1) * page_size
+    return {
+        "items": all_items[offset : offset + page_size],
+        "total": total if total else len(all_items),
+    }
+
+
 @router.get("/items")
 async def search_existing_items(
     gateway: Annotated[HomeboxGateway, Depends(get_gateway)],
     q: str = Query(default="", max_length=120),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=40, ge=1, le=50),
+    sort: Literal["newest", "oldest", "name_asc", "name_desc"] = Query(default="newest"),
 ) -> dict[str, Any]:
     """Return one bounded Homebox page and its thumbnail references.
 
     Homebox may include location/container entities in its total; only regular
     inventory items are rendered, but paging follows Homebox's raw result set.
     """
-    response = await gateway.list_items(query=q.strip() or None, page=page, page_size=page_size)
+    order_by, direction = {
+        "newest": ("createdAt", "desc"),
+        "oldest": ("createdAt", "asc"),
+        "name_asc": ("name", "asc"),
+        "name_desc": ("name", "desc"),
+    }[sort]
+    query = q.strip() or None
+    if await _requires_legacy_reverse_sort(gateway, sort):
+        response = await _reverse_legacy_sort(
+            gateway,
+            query=query,
+            order_by=order_by,
+            page=page,
+            page_size=page_size,
+        )
+    else:
+        response = await gateway.list_items(
+            query=query,
+            page=page,
+            page_size=page_size,
+            order_by=order_by,
+            order_direction=direction,
+        )
     raw_items = response.get("items", [])
     items = []
     for item in raw_items:

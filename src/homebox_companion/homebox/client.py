@@ -1036,6 +1036,8 @@ class HomeboxClient:
         query: str | None = None,
         page: int | None = None,
         page_size: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> dict[str, Any]:
         """List items with optional filtering, search, and pagination.
 
@@ -1046,6 +1048,8 @@ class HomeboxClient:
             query: Optional search query string.
             page: Optional page number (1-indexed).
             page_size: Optional number of items per page.
+            order_by: Homebox field to order by (e.g. createdAt or name).
+            order_direction: asc or desc; sorting occurs before pagination.
 
         Returns:
             Full paginated response: {items: [...], page, pageSize, total}
@@ -1062,6 +1066,10 @@ class HomeboxClient:
             params["page"] = page
         if page_size is not None:
             params["pageSize"] = page_size
+        if order_by is not None:
+            params["orderBy"] = order_by
+        if order_direction is not None:
+            params["orderDirection"] = order_direction
 
         response = await self.client.get(
             f"{self.base_url}/entities",

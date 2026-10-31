@@ -116,3 +116,10 @@ New entries redact configured credentials and common credential fields before
 emission, and exception logs do not include diagnostic local variables. Historical
 log files are not rewritten. Logs can contain inventory prompts, responses and
 other sensitive details, so review exports before sharing them.
+
+## Maintained Unraid fork
+
+For the super-sonicX fork's review-before-deployment workflow, compatibility
+tests, versioned Docker builds, persistent data backups and rollback, read
+[fork maintenance](fork-maintenance.md). Production is built from the fork's
+merged and validated source, not the unmodified upstream image.
