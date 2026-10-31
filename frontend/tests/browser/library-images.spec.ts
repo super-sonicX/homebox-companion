@@ -314,3 +314,40 @@ test('eBay listing photos are fetched only after clicking View listing photos', 
 	await expect(page.getByText('Polymaker dryer — eBay listing')).toBeVisible();
 	expect(detailCalls).toBe(1);
 });
+
+test('Review blocks advancing during catalogue import and resets the picker for the next item', async ({
+	page,
+	api,
+}) => {
+	mockLibrary(api);
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json(detectedItems(['Storage box', 'ESP32 board']))
+	);
+	const gate = api.gate();
+	api.on('GET', '/api/library-images/download', async () => {
+		await gate.promise;
+		return {
+			status: 200,
+			contentType: 'image/jpeg',
+			body: 'mock image bytes',
+		};
+	});
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByRole('tab', { name: 'Library Images' }).click();
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
+	await page.getByRole('button', { name: 'Add to gallery' }).click();
+	await expect(page.getByRole('button', { name: 'Confirm', exact: true })).toBeDisabled();
+	await expect(page.getByRole('button', { name: 'Skip', exact: true })).toBeDisabled();
+	gate.release();
+	await expect(page.getByRole('tab', { name: 'Your Photos (2)' })).toBeVisible();
+	await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+	await expect(page.getByRole('tab', { name: 'Your Photos (1)' })).toBeVisible();
+	await page.getByRole('tab', { name: 'Library Images' }).click();
+	await expect(page.getByText('Test catalogue image')).toHaveCount(0);
+	await page.getByRole('button', { name: 'Google Images Lite' }).click();
+	await expect(page.getByRole('textbox', { name: 'Library image search' })).toHaveValue(
+		'ESP32 board'
+	);
+});

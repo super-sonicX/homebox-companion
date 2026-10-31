@@ -155,6 +155,17 @@ async def test_updating_common_fields_preserves_tags_parent_and_custom_fields(ga
 
 
 @pytest.mark.asyncio
+async def test_fractional_quantity_is_preserved_for_homebox_027(gallery_path):
+    """Homebox 0.27+ explicitly stores quantity as float64; never silently round it."""
+    gateway = FakeGateway(inventory_fixture())
+    result = await edit_existing_item(
+        "item-1", ItemDetailsUpdate(quantity=1.5), cast(HomeboxGateway, gateway)
+    )
+    assert gateway.edits[0]["quantity"] == 1.5
+    assert result["quantity"] == 1.5
+
+
+@pytest.mark.asyncio
 async def test_stale_edit_is_blocked_before_homebox_put(gallery_path):
     gateway = FakeGateway(inventory_fixture())
     with pytest.raises(HTTPException) as error:

@@ -34,7 +34,6 @@ _DATA_FILE = Path("/app/data/library_image_search.yaml")
 _SIGNING_KEY = secrets.token_bytes(32)  # Tokens expire on container restart.
 _MAX_DOWNLOAD = 8 * 1024 * 1024
 _MAX_PIXELS = 24_000_000
-Image.MAX_IMAGE_PIXELS = _MAX_PIXELS
 _RESULTS: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = {}
 _EBAY_GALLERIES: dict[str, tuple[float, dict[str, Any]]] = {}
 

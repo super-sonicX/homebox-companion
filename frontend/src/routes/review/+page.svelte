@@ -73,7 +73,8 @@
 	let showThumbnailEditor = $state(false);
 	const editor = new ReviewEditor();
 	let isAdvancing = $state(false);
-	const isProcessing = $derived(editor.isProcessing || isAdvancing);
+	let importingLibraryImage = $state(false);
+	const isProcessing = $derived(editor.isProcessing || isAdvancing || importingLibraryImage);
 	const allImages = $derived([
 		...(editedItem?.originalFile ? [editedItem.originalFile] : []),
 		...(editedItem?.additionalImages ?? []),
@@ -119,6 +120,7 @@
 				showExtendedFields = hasExtendedFieldData(editedItem);
 				showCustomFields = hasCustomFieldData(editedItem);
 				showImagesPanel = false;
+				imageTab = 'photos';
 				showAiCorrection = false;
 			}
 		});
@@ -197,7 +199,7 @@
 	}
 
 	async function skipItem() {
-		if (isAdvancing) return;
+		if (isProcessing) return;
 		isAdvancing = true;
 		try {
 			await workflow.skipItem();
@@ -212,7 +214,7 @@
 	}
 
 	async function confirmItem() {
-		if (!editedItem || isAdvancing) return;
+		if (!editedItem || isProcessing) return;
 		isAdvancing = true;
 		try {
 			const item = copyReviewItem(editedItem);
@@ -228,7 +230,7 @@
 	}
 
 	function handleLongPressConfirm() {
-		if (workflow.isEditingFailedItem) return;
+		if (workflow.isEditingFailedItem || isProcessing) return;
 		showConfirmAllDialog = true;
 	}
 
@@ -287,27 +289,50 @@
 			);
 	}
 
-	/** Add an explicitly selected catalogue image; preserve the item's own photos. */
+	/** Keep asynchronous catalogue imports on their original review item. */
 	async function addLibraryImage(image: LibraryImageResult, makePrimary: boolean): Promise<void> {
-		if (!editedItem) throw new Error('No item is being reviewed.');
+		const reviewId = currentItem?.reviewId;
+		if (!editedItem || !reviewId) throw new Error('No item is being reviewed.');
+		if (importingLibraryImage) throw new Error('Another image is being imported.');
 		if (allImages.length >= maxImages)
 			throw new Error('Maximum number of attached photos reached.');
-		const file = await libraryImages.download(image.id);
-		const updated = makePrimary ? [file, ...allImages] : [...allImages, file];
-		setReviewImages(updated);
-		if (makePrimary) {
-			const dataUrl = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onload = () => resolve(String(reader.result));
-				reader.onerror = () => reject(new Error('Unable to read the selected photo.'));
-				reader.readAsDataURL(file);
-			});
-			workflow.updateReviewDraft({ customThumbnail: dataUrl, thumbnailTransform: undefined });
+
+		// Block Confirm, Skip and long-press confirmation while an image is downloading.
+		// Navigation can still change the review identity, so verify it after each await.
+		importingLibraryImage = true;
+		try {
+			const file = await libraryImages.download(image.id);
+			if (workflow.currentItem?.reviewId !== reviewId)
+				throw new Error('The reviewed item changed; retry the image import.');
+			if (allImages.length >= maxImages)
+				throw new Error('Maximum number of attached photos reached.');
+
+			const updated = makePrimary ? [file, ...allImages] : [...allImages, file];
+			setReviewImages(updated);
+			if (makePrimary) {
+				const dataUrl = await new Promise<string>((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => resolve(String(reader.result));
+					reader.onerror = () => reject(new Error('Unable to read the selected photo.'));
+					reader.readAsDataURL(file);
+				});
+				if (workflow.currentItem?.reviewId !== reviewId) return;
+				workflow.updateReviewDraft(
+					{ customThumbnail: dataUrl, thumbnailTransform: undefined },
+					reviewId
+				);
+			}
+			if (workflow.currentItem?.reviewId === reviewId) {
+				showToast(
+					makePrimary
+						? 'Catalogue photo selected as thumbnail'
+						: 'Catalogue photo added to gallery',
+					'success'
+				);
+			}
+		} finally {
+			importingLibraryImage = false;
 		}
-		showToast(
-			makePrimary ? 'Catalogue photo selected as thumbnail' : 'Catalogue photo added to gallery',
-			'success'
-		);
 	}
 
 	// Derived images with data URLs for thumbnail editor
@@ -552,12 +577,14 @@
 							{maxImages}
 						/>
 					{:else if editedItem}
-						<LibraryImagePicker
-							name={editedItem.name}
-							manufacturer={editedItem.manufacturer}
-							modelNumber={editedItem.model_number}
-							onSelect={addLibraryImage}
-						/>
+						{#key currentItem?.reviewId}
+							<LibraryImagePicker
+								name={editedItem.name}
+								manufacturer={editedItem.manufacturer}
+								modelNumber={editedItem.model_number}
+								onSelect={addLibraryImage}
+							/>
+						{/key}
 					{/if}
 				</div>
 

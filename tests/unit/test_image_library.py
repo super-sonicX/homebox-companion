@@ -449,3 +449,27 @@ async def test_images_lite_uses_https_thumbnail_when_original_missing(monkeypatc
     assert results[0]["source_url"] == "https://polymaker.com/product/"
     assert lib.verify_result(results[0]["id"])["image_url"].startswith("https://encrypted-tbn0.gstatic.com/")
     assert lib.verify_result(results[1]["id"])["image_url"].startswith("https://encrypted-tbn0.gstatic.com/")
+
+
+
+def test_importing_catalogue_images_does_not_change_pillow_process_wide_limits():
+    """A catalogue import cannot lower the image limit for unrelated camera captures."""
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "from PIL import Image; "
+        "Image.MAX_IMAGE_PIXELS = 90_000_000; "
+        "from homebox_companion.core import image_library; "
+        "assert Image.MAX_IMAGE_PIXELS == 90_000_000"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=os.environ.copy(),
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

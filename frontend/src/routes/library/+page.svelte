@@ -192,6 +192,7 @@
 		void groupId;
 		untrack(() => {
 			detailGeneration++;
+			loadingItem = false;
 			selected = null;
 			clearDetailPreview();
 			void fetchPage(1, true);
@@ -276,6 +277,7 @@
 
 	function backToLibrary() {
 		detailGeneration++;
+		loadingItem = false;
 		selected = null;
 		clearDetailPreview();
 	}
