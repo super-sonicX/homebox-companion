@@ -21,6 +21,9 @@ class FakeGateway:
         self.calls = []
         self.images: dict[str, bytes] = {}
 
+    async def get_version(self):
+        return "0.27.1"
+
     async def list_items(self, **kwargs):
         self.calls.append(kwargs)
         page = kwargs["page"]
@@ -119,6 +122,83 @@ async def test_homebox_transport_sends_sort_fields_to_entities_endpoint():
         "orderBy": "createdAt",
         "orderDirection": "desc",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sort", "reverse_order"),
+    [
+        ("oldest", True),
+        ("name_desc", True),
+        ("newest", False),
+        ("name_asc", False),
+    ],
+)
+async def test_homebox_026_legacy_reverse_sort_applies_before_pagination(sort, reverse_order):
+    """Homebox 0.26.2 ignores orderDirection, so reverse its complete raw list."""
+
+    class LegacyGateway:
+        def __init__(self):
+            self.calls: list[dict] = []
+            self.raw = [
+                {
+                    "id": f"item-{index:03d}",
+                    "name": f"Item {index:03d}",
+                    "entityType": {"isLocation": index == 26},
+                }
+                for index in range(114)
+            ]
+
+        async def get_version(self):
+            return "0.26.2"
+
+        async def list_items(self, **kwargs):
+            self.calls.append(kwargs)
+            rows = self.raw
+            # Mimic v0.26.2: fixed descending createdAt or ascending name.
+            if kwargs["order_by"] == "createdAt":
+                rows = list(reversed(rows))
+            offset = (kwargs["page"] - 1) * kwargs["page_size"]
+            return {"items": rows[offset : offset + kwargs["page_size"]], "total": len(rows)}
+
+    gw = LegacyGateway()
+    first = await search_existing_items(cast(HomeboxGateway, gw), q="", page=1, page_size=40, sort=sort)
+    second = await search_existing_items(cast(HomeboxGateway, gw), q="", page=2, page_size=40, sort=sort)
+    third = await search_existing_items(cast(HomeboxGateway, gw), q="", page=3, page_size=40, sort=sort)
+    assert first["total"] == second["total"] == third["total"] == 114
+    # All 114 raw rows, including the one location, are sorted before page slicing.
+    all_ids = [item["id"] for response in (first, second, third) for item in response["items"]]
+    if sort in ("newest", "name_desc"):
+        expected = [f"item-{i:03d}" for i in range(113, -1, -1)]
+    else:
+        expected = [f"item-{i:03d}" for i in range(114)]
+    expected.remove("item-026")
+    assert all_ids == expected
+    if reverse_order:
+        assert all(call["page_size"] == 50 for call in gw.calls)
+        assert len(gw.calls) == 9  # 3 legacy upstream pages per requested page
+    else:
+        assert [call["page"] for call in gw.calls] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_legacy_reverse_sort_rejects_unbounded_inventory():
+    class ExcessiveGateway:
+        async def get_version(self):
+            return "0.26.2"
+
+        async def list_items(self, **kwargs):
+            return {"items": [{"id": "first", "name": "First"}], "total": 10_001}
+
+    with pytest.raises(HTTPException) as exc:
+        await search_existing_items(
+            cast(HomeboxGateway, ExcessiveGateway()),
+            q="",
+            page=1,
+            page_size=40,
+            sort="oldest",
+        )
+    assert exc.value.status_code == 422
 
 
 def _picture(width: int, height: int, colour: str, format: str = "PNG") -> bytes:
