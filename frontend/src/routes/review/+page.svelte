@@ -23,6 +23,8 @@
 	} from '$lib/components/form';
 	import AppContainer from '$lib/components/AppContainer.svelte';
 	import ImagesPanel from '$lib/components/ImagesPanel.svelte';
+	import LibraryImagePicker from '$lib/components/LibraryImagePicker.svelte';
+	import { libraryImages, type LibraryImageResult } from '$lib/api/libraryImages';
 	import AiCorrectionPanel from '$lib/components/AiCorrectionPanel.svelte';
 	import BackLink from '$lib/components/BackLink.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -66,11 +68,13 @@
 	let showExtendedFields = $state(false);
 	let showCustomFields = $state(false);
 	let showImagesPanel = $state(false);
+	let imageTab = $state<'photos' | 'library'>('photos');
 	let showAiCorrection = $state(false);
 	let showThumbnailEditor = $state(false);
 	const editor = new ReviewEditor();
 	let isAdvancing = $state(false);
-	const isProcessing = $derived(editor.isProcessing || isAdvancing);
+	let importingLibraryImage = $state(false);
+	const isProcessing = $derived(editor.isProcessing || isAdvancing || importingLibraryImage);
 	const allImages = $derived([
 		...(editedItem?.originalFile ? [editedItem.originalFile] : []),
 		...(editedItem?.additionalImages ?? []),
@@ -116,6 +120,7 @@
 				showExtendedFields = hasExtendedFieldData(editedItem);
 				showCustomFields = hasCustomFieldData(editedItem);
 				showImagesPanel = false;
+				imageTab = 'photos';
 				showAiCorrection = false;
 			}
 		});
@@ -127,6 +132,7 @@
 		if (showExtendedFields) {
 			showCustomFields = false;
 			showImagesPanel = false;
+			imageTab = 'photos';
 			showAiCorrection = false;
 		}
 	}
@@ -193,7 +199,7 @@
 	}
 
 	async function skipItem() {
-		if (isAdvancing) return;
+		if (isProcessing) return;
 		isAdvancing = true;
 		try {
 			await workflow.skipItem();
@@ -208,7 +214,7 @@
 	}
 
 	async function confirmItem() {
-		if (!editedItem || isAdvancing) return;
+		if (!editedItem || isProcessing) return;
 		isAdvancing = true;
 		try {
 			const item = copyReviewItem(editedItem);
@@ -224,7 +230,7 @@
 	}
 
 	function handleLongPressConfirm() {
-		if (workflow.isEditingFailedItem) return;
+		if (workflow.isEditingFailedItem || isProcessing) return;
 		showConfirmAllDialog = true;
 	}
 
@@ -281,6 +287,52 @@
 			workflow.updateReviewDraft(
 				prepareReviewItem(copyReviewItem(editedItem), images, originalImages)
 			);
+	}
+
+	/** Keep asynchronous catalogue imports on their original review item. */
+	async function addLibraryImage(image: LibraryImageResult, makePrimary: boolean): Promise<void> {
+		const reviewId = currentItem?.reviewId;
+		if (!editedItem || !reviewId) throw new Error('No item is being reviewed.');
+		if (importingLibraryImage) throw new Error('Another image is being imported.');
+		if (allImages.length >= maxImages)
+			throw new Error('Maximum number of attached photos reached.');
+
+		// Block Confirm, Skip and long-press confirmation while an image is downloading.
+		// Navigation can still change the review identity, so verify it after each await.
+		importingLibraryImage = true;
+		try {
+			const file = await libraryImages.download(image.id);
+			if (workflow.currentItem?.reviewId !== reviewId)
+				throw new Error('The reviewed item changed; retry the image import.');
+			if (allImages.length >= maxImages)
+				throw new Error('Maximum number of attached photos reached.');
+
+			const updated = makePrimary ? [file, ...allImages] : [...allImages, file];
+			setReviewImages(updated);
+			if (makePrimary) {
+				const dataUrl = await new Promise<string>((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => resolve(String(reader.result));
+					reader.onerror = () => reject(new Error('Unable to read the selected photo.'));
+					reader.readAsDataURL(file);
+				});
+				if (workflow.currentItem?.reviewId !== reviewId) return;
+				workflow.updateReviewDraft(
+					{ customThumbnail: dataUrl, thumbnailTransform: undefined },
+					reviewId
+				);
+			}
+			if (workflow.currentItem?.reviewId === reviewId) {
+				showToast(
+					makePrimary
+						? 'Catalogue photo selected as thumbnail'
+						: 'Catalogue photo added to gallery',
+					'success'
+				);
+			}
+		} finally {
+			importingLibraryImage = false;
+		}
 	}
 
 	// Derived images with data URLs for thumbnail editor
@@ -487,20 +539,54 @@
 					/>
 				{/if}
 
-				<!-- Images panel -->
-				<ImagesPanel
-					bind:images={() => allImages, setReviewImages}
-					customThumbnail={editedItem.customThumbnail}
-					onCustomThumbnailClear={() => {
-						if (editedItem) {
-							workflow.updateReviewDraft({ customThumbnail: undefined });
-						}
-					}}
-					expanded={showImagesPanel}
-					onToggle={toggleImagesPanel}
-					{maxFileSizeMb}
-					{maxImages}
-				/>
+				<!-- Photo tabs: personal photos and online catalogue images. -->
+				<div class="border-t border-neutral-700 pt-4">
+					<div role="tablist" aria-label="Item photos" class="mb-3 flex gap-2">
+						<button
+							type="button"
+							role="tab"
+							aria-selected={imageTab === 'photos'}
+							class="rounded-lg px-3 py-2 text-body-sm {imageTab === 'photos'
+								? 'bg-primary-600 text-neutral-100'
+								: 'bg-neutral-800 text-neutral-300'}"
+							onclick={() => (imageTab = 'photos')}>Your Photos ({allImages.length})</button
+						>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={imageTab === 'library'}
+							class="rounded-lg px-3 py-2 text-body-sm {imageTab === 'library'
+								? 'bg-primary-600 text-neutral-100'
+								: 'bg-neutral-800 text-neutral-300'}"
+							onclick={() => (imageTab = 'library')}>Library Images</button
+						>
+					</div>
+					{#if imageTab === 'photos'}
+						<!-- Images panel -->
+						<ImagesPanel
+							bind:images={() => allImages, setReviewImages}
+							customThumbnail={editedItem.customThumbnail}
+							onCustomThumbnailClear={() => {
+								if (editedItem) {
+									workflow.updateReviewDraft({ customThumbnail: undefined });
+								}
+							}}
+							expanded={showImagesPanel}
+							onToggle={toggleImagesPanel}
+							{maxFileSizeMb}
+							{maxImages}
+						/>
+					{:else if editedItem}
+						{#key currentItem?.reviewId}
+							<LibraryImagePicker
+								name={editedItem.name}
+								manufacturer={editedItem.manufacturer}
+								modelNumber={editedItem.model_number}
+								onSelect={addLibraryImage}
+							/>
+						{/key}
+					{/if}
+				</div>
 
 				<!-- AI Correction panel -->
 				<AiCorrectionPanel

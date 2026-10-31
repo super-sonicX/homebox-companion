@@ -10,6 +10,7 @@ from .field_preferences import router as field_preferences_router
 from .groups import router as groups_router
 from .homebox import router as homebox_router
 from .items import router as items_router
+from .library_images import router as library_images_router
 from .llm_profiles import router as llm_profiles_router
 from .locations import router as locations_router
 from .logs import router as logs_router
@@ -30,6 +31,7 @@ api_router.include_router(field_preferences_router, tags=["settings"])
 api_router.include_router(groups_router, tags=["groups"])
 api_router.include_router(homebox_router, tags=["homebox"])
 api_router.include_router(llm_profiles_router, tags=["llm"])
+api_router.include_router(library_images_router, tags=["library-images"])
 api_router.include_router(locations_router, tags=["locations"])
 api_router.include_router(tags_router, tags=["tags"])
 api_router.include_router(items_router, tags=["items"])
