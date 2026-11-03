@@ -9,8 +9,6 @@
 > **Not affiliated with the Homebox project.** This is an unofficial third-party companion app.
 
 AI-powered companion for [Homebox](https://github.com/sysadminsmedia/homebox) inventory management.
-
-> **Contributing to the maintained fork:** All changes must use a pull request, receive a completed CodeRabbit review, and resolve actionable findings **before merge**. See [Contribution and Review Standards](CONTRIBUTING.md).
 <table align="center">
   <tr>
     <td><img src=".github/assets/images/01_select_location.png" width="180" alt="Select Location"></td>
