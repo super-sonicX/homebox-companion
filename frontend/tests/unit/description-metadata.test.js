@@ -96,3 +96,13 @@ test('decimal or version suffix is not mistaken for a complete identifier', () =
 	const changes = reconcileDescriptionMetadata(previous, { model_number: 'ABC-123' });
 	assert.match(changes.description, /Part\/model number: ABC-123\./);
 });
+
+test('metadata correction preserves user-entered paragraph breaks', () => {
+	const previous = current({
+		description: 'Product with context.\n\nManufacturer: WrongCo.\n\nImportant second paragraph.',
+		manufacturer: 'WrongCo',
+	});
+	const changes = reconcileDescriptionMetadata(previous, { manufacturer: 'RightCo' });
+	assert.match(changes.description, /\n\nImportant second paragraph/);
+	assert.match(changes.description, /Manufacturer: RightCo/);
+});

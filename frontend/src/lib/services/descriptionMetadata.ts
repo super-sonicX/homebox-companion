@@ -46,7 +46,7 @@ function changeIdentifier(
 	if (newValue && !identifierPattern(newValue).test(text)) {
 		text = `${text.trim()} ${label}: ${newValue}.`.trim();
 	}
-	return text.replace(/\s{2,}/g, ' ').trim();
+	return text.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 const CUSTOM_IDENTIFIER_NAMES = [

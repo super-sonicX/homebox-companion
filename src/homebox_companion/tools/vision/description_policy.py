@@ -150,4 +150,4 @@ def remove_superseded_generated_identifiers(
             return match.group(0) if match.group("value").strip().casefold() == desired else ""
 
         text = clause.sub(replace_stale, text)
-    return re.sub(r"\s{2,}", " ", text).strip()
+    return re.sub(r"[ \t]{2,}", " ", text).strip()

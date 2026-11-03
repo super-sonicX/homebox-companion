@@ -192,3 +192,14 @@ async def test_detection_returns_actionable_422_for_long_custom_identifier(monke
         response = await client.post("/detect", files={"image": ("part.jpg", image.getvalue(), "image/jpeg")})
     assert response.status_code == 422
     assert "1000 characters" in response.json()["detail"]
+
+
+def test_save_preserves_user_paragraph_breaks_when_reconciling_metadata():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    original = "First paragraph. Manufacturer: WrongCo.\n\nSecond paragraph is important."
+    cleaned = remove_superseded_generated_identifiers(
+        original, manufacturer="RightCo", explicitly_updated=frozenset({"manufacturer"})
+    )
+    assert "\n\nSecond paragraph" in cleaned
+    assert "WrongCo" not in cleaned
