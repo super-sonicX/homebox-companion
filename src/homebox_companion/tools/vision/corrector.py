@@ -16,6 +16,7 @@ from ...ai.prompts import (
     build_tag_prompt,
 )
 from ...ai.response_models import get_items_response_model
+from .description_policy import INVENTORY_DESCRIPTION_GUIDANCE
 from .models import DetectedItem, get_items_adapter
 
 if TYPE_CHECKING:
@@ -80,6 +81,7 @@ async def correct_item(
         "- Name/description fix → return single corrected item\n"
         "- Extract price→purchasePrice, store→purchaseFrom, brand→manufacturer\n"
         "- Always verify against the image\n\n"
+        f"{INVENTORY_DESCRIPTION_GUIDANCE}\n"
         # 4. Schema
         f"{item_schema}\n"
         f"{extended_schema}\n"

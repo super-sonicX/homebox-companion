@@ -132,3 +132,46 @@ async def test_trimmed_name_and_zero_price_are_accepted(gateway):
     response = await submit(gateway, [{"name": "  Lamp  ", "quantity": 1, "purchase_price": 0}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].name == "Lamp"
+
+
+@pytest.mark.asyncio
+async def test_create_aggregates_edited_manufacturer_model_and_custom_part_number(gateway):
+    """The final editor values must be in Description, not only separate fields."""
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Front Bumper Bracket Set Peugeot 308",
+                "description": "Replacement front bumper mounting brackets for a Peugeot 308.",
+                "manufacturer": "Peugeot",
+                "model_number": "PG4301005",
+                "custom_fields": {"Supplier Part Number": "ABC-123"},
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Peugeot" in created.description
+    assert "PG4301005" in created.description
+    assert "ABC-123" in created.description
+    assert "packaging" not in created.description
+    assert gateway.update_item.await_args.args[1]["modelNumber"] == "PG4301005"
+    assert gateway.update_item.await_args.args[1]["manufacturer"] == "Peugeot"
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_duplicate_identifiers_already_in_description(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Molex Connector",
+                "description": "Molex connector, part 50-57-9503.",
+                "manufacturer": "Molex",
+                "model_number": "50-57-9503",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Molex connector, part 50-57-9503."

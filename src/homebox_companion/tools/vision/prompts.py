@@ -13,6 +13,7 @@ from ...ai.prompts import (
     build_naming_examples,
     build_tag_prompt,
 )
+from .description_policy import INVENTORY_DESCRIPTION_GUIDANCE
 
 if TYPE_CHECKING:
     from ...core.persistent_settings import CustomFieldDefinition
@@ -67,6 +68,7 @@ def build_detection_system_prompt(
         f"{language_instr}\n"
         # 3. Critical constraints FIRST
         f"{critical}\n\n"
+        f"{INVENTORY_DESCRIPTION_GUIDANCE}\n"
         # 4. Schema
         f"{item_schema}"
         f"{extended_schema}"
@@ -172,6 +174,7 @@ def build_multi_image_system_prompt(
         f"{language_instr}\n"
         # 3. Critical constraints FIRST
         f"{critical}\n\n"
+        f"{INVENTORY_DESCRIPTION_GUIDANCE}\n"
         # 4. Schema
         f"{item_schema}"
         f"{extended_schema}"
@@ -304,7 +307,8 @@ def build_analysis_system_prompt(
         f"{language_instr}\n"
         # 3. Critical instruction
         "Extract ALL visible details: serial numbers, model numbers, brand, "
-        "price tags, condition issues. Only report facts that are visible or user-stated.\n\n"
+        "price tags and functionally meaningful issues. Only report facts that are visible or user-stated.\n\n"
+        f"{INVENTORY_DESCRIPTION_GUIDANCE}\n"
         # 4. Output schema
         "Return JSON with:\n"
         f"- name: string ({name_instr})\n"

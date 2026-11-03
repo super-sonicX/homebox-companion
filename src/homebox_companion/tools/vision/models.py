@@ -11,7 +11,9 @@ from collections.abc import Iterator
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, model_validator
+
+from .description_policy import aggregate_description
 
 if TYPE_CHECKING:
     from ...core.persistent_settings import CustomFieldDefinition
@@ -43,6 +45,17 @@ class DetectedItem(BaseModel):
     purchase_price: float | None = Field(default=None, ge=0, alias="purchasePrice")
     purchase_from: Annotated[str, Field(max_length=255)] | None = Field(default=None, alias="purchaseFrom")
     notes: Annotated[str, Field(max_length=1000)] | None = None
+
+    @model_validator(mode="after")
+    def include_identifiers_in_description(self) -> DetectedItem:
+        """Make manufacturer/model/serial searchable from list results."""
+        self.description = aggregate_description(
+            self.description,
+            manufacturer=self.manufacturer,
+            model_number=self.model_number,
+            serial_number=self.serial_number,
+        )
+        return self
 
     def get_extended_fields_payload(self) -> dict[str, str | float] | None:
         """Get extended fields that require an update after item creation.
