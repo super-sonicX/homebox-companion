@@ -71,7 +71,6 @@ def aggregate_description(
     financial_custom_terms = (
         "price",
         "cost",
-        "value",
         "amount",
         "payment",
         "invoice",
@@ -80,7 +79,6 @@ def aggregate_description(
         "postage",
         "tax",
         "vat",
-        "total",
         "discount",
     )
     for key, value in (custom_fields or {}).items():
@@ -90,6 +88,7 @@ def aggregate_description(
             and value
             and any(term in name for term in relevant_custom_identifiers)
             and not any(term in name for term in financial_custom_terms)
+            and not str(value).strip().startswith(("£", "$", "€"))
         ):
             values.append((key, value))
 
@@ -100,7 +99,7 @@ def aggregate_description(
         # "12V", or "ABC-123" in "ABC-1234" for an exact match.
         if not value:
             continue
-        token = re.compile(rf"(?<![\w.-]){re.escape(value)}(?![\w-]|\.\w)", re.IGNORECASE)
+        token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
         if token.search(result):
             continue
         phrase = f"{label}: {value}."
@@ -144,9 +143,12 @@ def remove_superseded_generated_identifiers(
         # This avoids splitting manufacturer values such as "Acme Inc. Ltd".
         next_label = r"(?:Manufacturer|Part/model number|Serial number):"
         clause = re.compile(
-            rf"(?<!\S){re.escape(label)}:\s*(?P<value>.+?)\.(?=\s+{next_label}|(?:\r?\n){{2,}}|\s*$)",
+            rf"(?<!\S){re.escape(label)}:[ \t]*(?P<value>[^\r\n]+?)\.(?=\s+{next_label}|(?:\r?\n){{2,}}|\s*$)",
             re.IGNORECASE,
         )
+        # A blank metadata label is not a value; do not read the next paragraph
+        # as its content if the user clears the structured field.
+        text = re.sub(rf"(?m)(?<!\S){re.escape(label)}:[ \t]*(?=\r?$)", "", text)
         desired = (expected or "").strip().casefold()
 
         def replace_stale(match: re.Match[str], *, desired: str = desired) -> str:

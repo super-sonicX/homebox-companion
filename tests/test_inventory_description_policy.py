@@ -227,3 +227,35 @@ def test_generated_manufacturer_with_internal_periods_is_fully_replaced_or_clear
         )
         assert cleaned == "Relay. Part/model number: P-1."
         assert "Ltd" not in cleaned
+
+
+def test_nonfinancial_technical_value_fields_are_aggregated():
+    result = aggregate_description(
+        "Assorted electrical components.",
+        custom_fields={
+            "Resistance Value": "100 ohm",
+            "Capacitance Value": "10uF",
+            "Total Capacity": "10A",
+            "Reference Price": "£3.00",
+        },
+    )
+    assert "Resistance Value: 100 ohm." in result
+    assert "Capacitance Value: 10uF." in result
+    assert "Total Capacity: 10A." in result
+    assert "£3.00" not in result
+
+
+def test_slash_suffix_is_not_a_complete_model_match():
+    result = aggregate_description("Alternative model ABC-123/4.", model_number="ABC-123")
+    assert "Part/model number: ABC-123." in result
+
+
+def test_blank_manufacturer_label_does_not_consume_user_notes():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    original = "Relay. Manufacturer:\n\nKeep these safety notes."
+    cleaned = remove_superseded_generated_identifiers(
+        original, manufacturer="NewCo", explicitly_updated=frozenset({"manufacturer"})
+    )
+    assert "Keep these safety notes." in cleaned
+    assert cleaned.startswith("Relay.")

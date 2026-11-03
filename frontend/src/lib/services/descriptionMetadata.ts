@@ -14,7 +14,7 @@ function escapeRegex(value: string): string {
 /** Match a complete identifier: GE must not match "voltage" or "ABC-123" match "ABC-123.4". */
 function identifierPattern(value: string): RegExp {
 	return new RegExp(
-		`(?<![\\p{L}\\p{N}_.-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}_])`,
+		`(?<![\\p{L}\\p{N}_.-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|[\\./][\\p{L}\\p{N}_])`,
 		'giu'
 	);
 }
@@ -51,10 +51,17 @@ function changeIdentifier(
 		text = text.replace(generated, ' ').trim();
 		// If the AI also mentioned the old value in functional prose, update it.
 		// Everything from the first known metadata heading onward is protected.
-		const boundary = narrativeBoundary(text, protectedLabels);
-		text =
-			text.slice(0, boundary).replace(identifierPattern(oldValue), () => newValue) +
-			text.slice(boundary);
+		// Technical readings such as Capacity=1 must never change unrelated
+		// prose (e.g. "1 port"). Only distinct identity values may be updated
+		// outside their own labelled clauses; numeric-only values are ambiguous.
+		const isIdentity = ['Manufacturer', 'Part/model number', 'Serial number'].includes(label);
+		const distinctive = /[\p{L}_/-]/u.test(oldValue) && oldValue.length >= 3;
+		if (isIdentity && distinctive) {
+			const boundary = narrativeBoundary(text, protectedLabels);
+			text =
+				text.slice(0, boundary).replace(identifierPattern(oldValue), () => newValue) +
+				text.slice(boundary);
+		}
 	}
 
 	const boundary = narrativeBoundary(text, protectedLabels);
@@ -95,7 +102,6 @@ const CUSTOM_IDENTIFIER_NAMES = [
 const FINANCIAL_NAMES = [
 	'price',
 	'cost',
-	'value',
 	'amount',
 	'payment',
 	'invoice',
@@ -104,7 +110,6 @@ const FINANCIAL_NAMES = [
 	'postage',
 	'tax',
 	'vat',
-	'total',
 	'discount',
 ];
 
@@ -135,6 +140,7 @@ export function reconcileDescriptionMetadata(
 		for (const key of new Set([...Object.keys(oldFields), ...Object.keys(newFields)])) {
 			if (!CUSTOM_IDENTIFIER_NAMES.some((name) => key.toLowerCase().includes(name))) continue;
 			if (FINANCIAL_NAMES.some((name) => key.toLowerCase().includes(name))) continue;
+			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
 			description = changeIdentifier(
 				description,

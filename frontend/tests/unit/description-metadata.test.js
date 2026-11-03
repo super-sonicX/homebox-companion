@@ -120,3 +120,33 @@ test('editing current leaves voltage intact when both fields shared the same val
 	assert.doesNotMatch(changes.description, /Voltage: 24\./);
 	assert.doesNotMatch(changes.description, /Current: 12\./);
 });
+
+test('changing numeric capacity preserves unrelated port count in prose', () => {
+	const previous = current({
+		description: 'Converter with 1 port. Capacity: 1.',
+		custom_fields: { Capacity: '1' },
+	});
+	const changes = reconcileDescriptionMetadata(previous, { custom_fields: { Capacity: '2' } });
+	assert.match(changes.description, /with 1 port/);
+	assert.match(changes.description, /Capacity: 2\./);
+	assert.doesNotMatch(changes.description, /with 2 port|Capacity: 1\./);
+});
+
+test('editing technical Value fields preserves another matching measurement', () => {
+	const previous = current({
+		description: 'Component. Resistance Value: 100. Capacitance Value: 100.',
+		custom_fields: { 'Resistance Value': '100', 'Capacitance Value': '100' },
+	});
+	const changes = reconcileDescriptionMetadata(previous, {
+		custom_fields: { 'Resistance Value': '200', 'Capacitance Value': '100' },
+	});
+	assert.match(changes.description, /Resistance Value: 200\./);
+	assert.match(changes.description, /Capacitance Value: 100\./);
+	assert.doesNotMatch(changes.description, /Capacitance Value: 200\./);
+});
+
+test('slash suffix does not suppress distinct part number', () => {
+	const previous = current({ description: 'Version ABC-123/4.', model_number: null });
+	const changes = reconcileDescriptionMetadata(previous, { model_number: 'ABC-123' });
+	assert.match(changes.description, /Part\/model number: ABC-123\./);
+});
