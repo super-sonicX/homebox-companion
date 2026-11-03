@@ -73,7 +73,7 @@ class FieldPreferences(BaseSettings):
     )
 
     # Description instructions - env var: HBC_AI_DESCRIPTION
-    description: str = "Product features and specifications - what IS this item. Max 1000 chars, NEVER mention quantity"
+    description: str = "One concise functional sentence: what item is/does, important specs, manufacturer and part numbers; not packaging narration. Max 1000 chars, NEVER mention quantity unless essential to identify a kit."
 
     # Quantity counting instructions - env var: HBC_AI_QUANTITY
     quantity: str = "Count identical items together, separate different variants"
@@ -95,8 +95,8 @@ class FieldPreferences(BaseSettings):
 
     # Notes instructions - env var: HBC_AI_NOTES
     notes: str = (
-        "Only for visible issues: damage, missing parts, safety hazards. "
-        "Also note if sealed/new-in-box. Leave null for normal items."
+        "Only meaningful functional issues, missing parts, safety concerns, provenance, or useful technical detail. "
+        "Do not record ordinary packaging wear, box appearance or photo observations. Leave null otherwise."
     )
 
     @property

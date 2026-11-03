@@ -132,3 +132,101 @@ async def test_trimmed_name_and_zero_price_are_accepted(gateway):
     response = await submit(gateway, [{"name": "  Lamp  ", "quantity": 1, "purchase_price": 0}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].name == "Lamp"
+
+
+@pytest.mark.asyncio
+async def test_create_aggregates_edited_manufacturer_model_and_custom_part_number(gateway):
+    """The final editor values must be in Description, not only separate fields."""
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Front Bumper Bracket Set Peugeot 308",
+                "description": "Replacement front bumper mounting brackets for a Peugeot 308.",
+                "manufacturer": "Peugeot",
+                "model_number": "PG4301005",
+                "custom_fields": {"Supplier Part Number": "ABC-123"},
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Peugeot" in created.description
+    assert "PG4301005" in created.description
+    assert "ABC-123" in created.description
+    assert "packaging" not in created.description
+    assert gateway.update_item.await_args.args[1]["modelNumber"] == "PG4301005"
+    assert gateway.update_item.await_args.args[1]["manufacturer"] == "Peugeot"
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_duplicate_identifiers_already_in_description(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Molex Connector",
+                "description": "Molex connector, part 50-57-9503.",
+                "manufacturer": "Molex",
+                "model_number": "50-57-9503",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Molex connector, part 50-57-9503."
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_identifiers_from_edited_fields(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Manufacturer: WrongCo. Part/model number: OLD-123.",
+                "manufacturer": "RightCo",
+                "model_number": "NEW-456",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "RightCo" in created.description and "NEW-456" in created.description
+    assert "WrongCo" not in created.description and "OLD-123" not in created.description
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_model_when_explicitly_cleared(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Part/model number: OLD-123.",
+                "model_number": None,
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Peugeot bumper brackets."
+
+
+@pytest.mark.asyncio
+async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1.",
+                "manufacturer": "NewCo",
+                "model_number": "P-1",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Acme" not in created.description and "Ltd" not in created.description
+    assert "NewCo" in created.description and "Part/model number: P-1." in created.description

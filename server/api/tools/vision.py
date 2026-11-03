@@ -19,6 +19,7 @@ from homebox_companion import (
     correct_item as llm_correct_item,
 )
 from homebox_companion.ai.images import INVALID_IMAGE_MESSAGE, validate_image_bytes
+from homebox_companion.tools.vision.description_policy import aggregate_description
 from homebox_companion.tools.vision.models import get_custom_fields_dict
 
 from ...dependencies import (
@@ -40,6 +41,27 @@ from ...services.duplicate_checker import DuplicateChecker
 from ...services.image_processing import run_image_processing
 
 router = APIRouter()
+
+
+def aggregate_description_or_422(
+    description: str | None,
+    *,
+    manufacturer: str | None = None,
+    model_number: str | None = None,
+    serial_number: str | None = None,
+    custom_fields: dict[str, str] | None = None,
+) -> str:
+    """Report overlong AI descriptions as actionable validation errors, not HTTP 500."""
+    try:
+        return aggregate_description(
+            description,
+            manufacturer=manufacturer,
+            model_number=model_number,
+            serial_number=serial_number,
+            custom_fields=custom_fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 async def _validated_image(file: UploadFile, request: Request) -> tuple[bytes, str]:
@@ -159,7 +181,13 @@ async def detect_items(
         DetectedItemResponse(
             name=item.name,
             quantity=item.quantity,
-            description=item.description,
+            description=aggregate_description_or_422(
+                item.description,
+                manufacturer=item.manufacturer,
+                model_number=item.model_number,
+                serial_number=item.serial_number,
+                custom_fields=get_custom_fields_dict(item, ctx.custom_fields),
+            ),
             tag_ids=filter_default_tag(item.tag_ids, ctx.default_tag_id),
             manufacturer=item.manufacturer,
             model_number=item.model_number,
@@ -247,7 +275,13 @@ async def analyze_item_advanced(
     # Filter out default tag from AI suggestions (frontend will auto-add it)
     return AdvancedItemDetails(
         name=details.name,
-        description=details.description,
+        description=aggregate_description_or_422(
+            details.description,
+            manufacturer=details.manufacturer,
+            model_number=details.model_number,
+            serial_number=details.serial_number,
+            custom_fields=get_custom_fields_dict(details, ctx.custom_fields),
+        ),
         serial_number=details.serial_number,
         model_number=details.model_number,
         manufacturer=details.manufacturer,
@@ -329,7 +363,13 @@ async def correct_item(
             CorrectedItemResponse(
                 name=item.name,
                 quantity=item.quantity,
-                description=item.description,
+                description=aggregate_description_or_422(
+                    item.description,
+                    manufacturer=item.manufacturer,
+                    model_number=item.model_number,
+                    serial_number=item.serial_number,
+                    custom_fields=get_custom_fields_dict(item, ctx.custom_fields),
+                ),
                 tag_ids=filter_default_tag(item.tag_ids, ctx.default_tag_id),
                 manufacturer=item.manufacturer,
                 model_number=item.model_number,
