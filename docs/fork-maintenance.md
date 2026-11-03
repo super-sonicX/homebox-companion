@@ -8,7 +8,7 @@ Duelion/homebox-companion upstream remains a fetch-only integration source.
 upstream's unmodified image over the local customisations. The upstream review
 process and upstream PRs are separate from this private deployment decision.
 
-**Review scope:** follow the [upstream-compatible review triage policy](review-triage-upstream.md). Fix regressions we introduce and verified high/critical issues even if upstream, but normally defer unrelated non-critical upstream defects instead of creating unnecessary fork divergence. Every finding requires an explicit decision and rationale before merge.
+**Review scope:** follow the [upstream-compatible review triage policy](review-triage-upstream.md). Fix regressions we introduce, defects blocking required fork integrations, and verified high/critical issues even if upstream; normally defer unrelated non-critical upstream defects instead of creating unnecessary fork divergence. Every finding requires an explicit decision and rationale before merge.
 
 ## Fork-specific features to preserve
 
