@@ -21,7 +21,10 @@ from homebox_companion.homebox.relationships import (
     location_override_for_parent,
     preflight_item_placement,
 )
-from homebox_companion.tools.vision.description_policy import aggregate_description
+from homebox_companion.tools.vision.description_policy import (
+    aggregate_description,
+    remove_superseded_generated_identifiers,
+)
 
 from ..dependencies import get_gateway, get_valid_tag_ids, validate_file_size
 from ..schemas.items import BatchCreateRequest
@@ -126,7 +129,13 @@ async def create_items(
             detected_item = DetectedItem(
                 name=item_input.name,
                 quantity=item_input.quantity,
-                description=item_input.description,
+                description=remove_superseded_generated_identifiers(
+                    item_input.description,
+                    manufacturer=item_input.manufacturer,
+                    model_number=item_input.model_number,
+                    serial_number=item_input.serial_number,
+                    explicitly_updated=frozenset(item_input.model_fields_set),
+                ),
                 parent_id=parent_id,
                 tag_ids=validated_tag_ids if validated_tag_ids else None,
                 manufacturer=item_input.manufacturer,
@@ -429,7 +438,7 @@ async def print_item_label(
         result = await gateway.print_label(item.asset_id)
         logger.info(f"Label printed for item {item_id} (asset {item.asset_id}): {result}")
         return {"message": result}
-    except (HomeboxCompanionError, HTTPException):
+    except HomeboxCompanionError, HTTPException:
         raise
     except Exception as e:
         raise HomeboxAPIError(

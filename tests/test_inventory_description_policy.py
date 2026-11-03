@@ -78,3 +78,117 @@ def test_persistent_description_preference_cannot_undo_mandatory_guidance():
     prompt = build_detection_system_prompt(field_preferences={"description": "Describe every scratch on the box."})
     assert "Describe every scratch on the box." in prompt
     assert INVENTORY_DESCRIPTION_GUIDANCE.strip() in prompt
+
+
+def test_short_manufacturer_must_not_match_inside_unrelated_word():
+    result = aggregate_description("A voltage regulator.", manufacturer="GE")
+    assert "Manufacturer: GE." in result
+
+
+def test_part_number_must_not_match_longer_part_number():
+    result = aggregate_description("Alternative ABC-1234.", model_number="ABC-123")
+    assert "Part/model number: ABC-123." in result
+
+
+def test_custom_numeric_value_must_not_match_another_rating():
+    result = aggregate_description("A 12V power supply.", custom_fields={"Current": "2"})
+    assert "Current: 2." in result
+
+
+def test_financial_reference_price_is_excluded_from_description():
+    result = aggregate_description(
+        "DC-DC converter module.",
+        custom_fields={"Supplier Reference": "REF-123", "Reference Price": "£3.00", "Invoice Reference": "INV-99"},
+    )
+    assert "Supplier Reference: REF-123." in result
+    assert "£3.00" not in result
+    assert "INV-99" not in result
+
+
+def test_vision_response_returns_422_instead_of_500_for_overflow():
+    from fastapi import HTTPException
+
+    from server.api.tools.vision import aggregate_description_or_422
+
+    with pytest.raises(HTTPException) as error:
+        aggregate_description_or_422(
+            "A" * 994,
+            custom_fields={"Supplier Part Number": "PG4301005"},
+        )
+    assert error.value.status_code == 422
+    assert "1000 characters" in str(error.value.detail)
+
+
+def test_save_reconciles_superseded_canonical_metadata_without_erasing_prose():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Bumper mounting brackets. Manufacturer: WrongCo. Part/model number: OLD-123."
+    cleaned = remove_superseded_generated_identifiers(
+        raw,
+        manufacturer="RightCo",
+        model_number="NEW-456",
+        explicitly_updated=frozenset({"manufacturer", "model_number"}),
+    )
+    assert cleaned == "Bumper mounting brackets."
+    result = aggregate_description(cleaned, manufacturer="RightCo", model_number="NEW-456")
+    assert "RightCo" in result and "NEW-456" in result
+    assert "WrongCo" not in result and "OLD-123" not in result
+
+
+def test_explicit_clearing_removes_generated_serial_but_not_unrelated_text():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    cleaned = remove_superseded_generated_identifiers(
+        "Important technical note. Serial number: BAD-SN-001.",
+        serial_number=None,
+        explicitly_updated=frozenset({"serial_number"}),
+    )
+    assert cleaned == "Important technical note."
+
+
+def test_unspecified_fields_do_not_strip_existing_generated_clauses():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Battery adapter. Manufacturer: ExampleCo."
+    assert remove_superseded_generated_identifiers(raw, explicitly_updated=frozenset()) == raw
+
+
+def test_part_number_matches_sentence_period_but_not_version_suffix():
+    assert (
+        aggregate_description("Molex connector 50-57-9503.", model_number="50-57-9503") == "Molex connector 50-57-9503."
+    )
+    result = aggregate_description("Different model ABC-123.4.", model_number="ABC-123")
+    assert "Part/model number: ABC-123." in result
+
+
+@pytest.mark.asyncio
+async def test_detection_returns_actionable_422_for_long_custom_identifier(monkeypatch):
+    """Exercise the API boundary, not only its helper: overflowing custom data is a 422."""
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from fastapi import FastAPI
+    from PIL import Image
+
+    from homebox_companion.core.config import Settings
+    from server.api.tools import vision
+    from server.dependencies import get_vision_context, require_llm_configured
+
+    app = FastAPI()
+    app.state.settings = Settings()
+    app.include_router(vision.router)
+    app.dependency_overrides[get_vision_context] = lambda: SimpleNamespace(
+        tags=[], field_preferences=None, output_language=None, custom_fields=[], default_tag_id=None
+    )
+    app.dependency_overrides[require_llm_configured] = lambda: "test-key"
+    detected = DetectedItem(name="Bumper bracket", description="x" * 995)
+    monkeypatch.setattr(vision, "detect_items_from_bytes", AsyncMock(return_value=[detected]))
+    monkeypatch.setattr(vision, "get_custom_fields_dict", lambda item, defs: {"Supplier Part Number": "PG4301005"})
+    image = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(image, format="JPEG")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        response = await client.post("/detect", files={"image": ("part.jpg", image.getvalue(), "image/jpeg")})
+    assert response.status_code == 422
+    assert "1000 characters" in response.json()["detail"]

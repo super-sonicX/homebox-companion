@@ -175,3 +175,39 @@ async def test_create_does_not_duplicate_identifiers_already_in_description(gate
     assert response.status_code == 200
     created = gateway.create_item.call_args.args[0]
     assert created.description == "Molex connector, part 50-57-9503."
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_identifiers_from_edited_fields(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Manufacturer: WrongCo. Part/model number: OLD-123.",
+                "manufacturer": "RightCo",
+                "model_number": "NEW-456",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "RightCo" in created.description and "NEW-456" in created.description
+    assert "WrongCo" not in created.description and "OLD-123" not in created.description
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_model_when_explicitly_cleared(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Part/model number: OLD-123.",
+                "model_number": None,
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Peugeot bumper brackets."

@@ -43,6 +43,27 @@ from ...services.image_processing import run_image_processing
 router = APIRouter()
 
 
+def aggregate_description_or_422(
+    description: str | None,
+    *,
+    manufacturer: str | None = None,
+    model_number: str | None = None,
+    serial_number: str | None = None,
+    custom_fields: dict[str, str] | None = None,
+) -> str:
+    """Report overlong AI descriptions as actionable validation errors, not HTTP 500."""
+    try:
+        return aggregate_description(
+            description,
+            manufacturer=manufacturer,
+            model_number=model_number,
+            serial_number=serial_number,
+            custom_fields=custom_fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 async def _validated_image(file: UploadFile, request: Request) -> tuple[bytes, str]:
     contents = await validate_file_size(file, request.app.state.settings)
     try:
@@ -160,7 +181,7 @@ async def detect_items(
         DetectedItemResponse(
             name=item.name,
             quantity=item.quantity,
-            description=aggregate_description(
+            description=aggregate_description_or_422(
                 item.description,
                 manufacturer=item.manufacturer,
                 model_number=item.model_number,
@@ -254,7 +275,7 @@ async def analyze_item_advanced(
     # Filter out default tag from AI suggestions (frontend will auto-add it)
     return AdvancedItemDetails(
         name=details.name,
-        description=aggregate_description(
+        description=aggregate_description_or_422(
             details.description,
             manufacturer=details.manufacturer,
             model_number=details.model_number,
@@ -342,7 +363,7 @@ async def correct_item(
             CorrectedItemResponse(
                 name=item.name,
                 quantity=item.quantity,
-                description=aggregate_description(
+                description=aggregate_description_or_422(
                     item.description,
                     manufacturer=item.manufacturer,
                     model_number=item.model_number,
