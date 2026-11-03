@@ -25,6 +25,6 @@ These are **mandatory working standards** for the maintained `super-sonicX/homeb
 
 ## Applicability and enforcement
 
-This policy applies **from its publication onward**. The initial publication of this standards file is a **one-time, user-authorised exception** committed directly to `main` so the policy is easy to discover. It is **not** permission for future direct commits.
+This policy applies **from its publication onward**. It is introduced through a reviewed pull request. All future changes, including changes to these standards, must go through the same review gates; there are no routine direct-to-`main` exceptions.
 
 Repository settings should also require pull requests and applicable status checks on `main` where available. The documented policy is mandatory even if GitHub branch protections or CodeRabbit's automated status checks are not yet configured to enforce it technically.
