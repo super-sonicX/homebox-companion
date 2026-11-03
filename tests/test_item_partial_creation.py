@@ -211,3 +211,22 @@ async def test_create_removes_old_generated_model_when_explicitly_cleared(gatewa
     assert response.status_code == 200
     created = gateway.create_item.call_args.args[0]
     assert created.description == "Peugeot bumper brackets."
+
+
+@pytest.mark.asyncio
+async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1.",
+                "manufacturer": "NewCo",
+                "model_number": "P-1",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Acme" not in created.description and "Ltd" not in created.description
+    assert "NewCo" in created.description and "Part/model number: P-1." in created.description

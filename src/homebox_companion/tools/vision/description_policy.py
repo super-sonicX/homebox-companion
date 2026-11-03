@@ -140,8 +140,11 @@ def remove_superseded_generated_identifiers(
     for key, (label, expected) in fields.items():
         if key not in explicitly_updated:
             continue
+        # A generated clause ends at the next canonical field or end of text.
+        # This avoids splitting manufacturer values such as "Acme Inc. Ltd".
+        next_label = r"(?:Manufacturer|Part/model number|Serial number):"
         clause = re.compile(
-            rf"(?<!\S){re.escape(label)}:\s*(?P<value>.+?)\.(?=\s|$)",
+            rf"(?<!\S){re.escape(label)}:\s*(?P<value>.+?)\.(?=\s+{next_label}|(?:\r?\n){{2,}}|\s*$)",
             re.IGNORECASE,
         )
         desired = (expected or "").strip().casefold()

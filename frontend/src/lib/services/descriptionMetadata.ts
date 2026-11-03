@@ -11,7 +11,7 @@ function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Full token boundaries, not arbitrary substrings (GE must not match 'voltage'). */
+/** Match a complete identifier: GE must not match "voltage" or "ABC-123" match "ABC-123.4". */
 function identifierPattern(value: string): RegExp {
 	return new RegExp(
 		`(?<![\\p{L}\\p{N}_.-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}_])`,
@@ -19,31 +19,54 @@ function identifierPattern(value: string): RegExp {
 	);
 }
 
+/** The functional narrative precedes generated metadata clauses. Never edit
+ * another field's clause, even if its value matches the edited field. */
+function narrativeBoundary(text: string, protectedLabels: readonly string[]): number {
+	let first = text.length;
+	for (const label of new Set(protectedLabels)) {
+		const heading = new RegExp(`(?:^|\\s+)${escapeRegex(label)}:\\s*`, 'iu');
+		const match = heading.exec(text);
+		if (match && match.index < first) first = match.index;
+	}
+	return first;
+}
+
 function changeIdentifier(
 	text: string,
 	label: string,
 	previous: string | null | undefined,
-	next: string | null | undefined
+	next: string | null | undefined,
+	protectedLabels: readonly string[]
 ): string {
 	const oldValue = (previous ?? '').trim();
 	const newValue = (next ?? '').trim();
 	if (oldValue === newValue) return text;
 
 	if (oldValue) {
-		// The backend adds canonical "Label: value." sentences; remove those first
-		// rather than leaving stale metadata alongside its corrected replacement.
+		// Remove only the canonical clause belonging to the edited field.
 		const generated = new RegExp(
 			`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(oldValue)}\\.(?=\\s|$)`,
 			'giu'
 		);
 		text = text.replace(generated, ' ').trim();
-		// The AI might already have included the identifier in ordinary prose.
-		// When a person corrects it, update that exact token rather than retaining a
-		// known-wrong manufacturer or part number in the searchable description.
-		text = text.replace(identifierPattern(oldValue), () => newValue);
+		// If the AI also mentioned the old value in functional prose, update it.
+		// Everything from the first known metadata heading onward is protected.
+		const boundary = narrativeBoundary(text, protectedLabels);
+		text =
+			text.slice(0, boundary).replace(identifierPattern(oldValue), () => newValue) +
+			text.slice(boundary);
 	}
 
-	if (newValue && !identifierPattern(newValue).test(text)) {
+	const boundary = narrativeBoundary(text, protectedLabels);
+	const mentionedInNarrative =
+		newValue && identifierPattern(newValue).test(text.slice(0, boundary));
+	const matchingOwnClause =
+		newValue &&
+		new RegExp(
+			`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(newValue)}\\.(?=\\s|$)`,
+			'iu'
+		).test(text);
+	if (newValue && !mentionedInNarrative && !matchingOwnClause) {
 		text = `${text.trim()} ${label}: ${newValue}.`.trim();
 	}
 	return text.replace(/[ \t]{2,}/g, ' ').trim();
@@ -85,20 +108,25 @@ const FINANCIAL_NAMES = [
 	'discount',
 ];
 
-/** Preserve user-edited description verbatim; sync only when metadata changes alone. */
+/** Preserve explicit description edits; sync when metadata changes by itself. */
 export function reconcileDescriptionMetadata(
 	current: ReviewItem,
 	updates: Partial<ReviewItem>
 ): Partial<ReviewItem> {
 	if (Object.prototype.hasOwnProperty.call(updates, 'description')) return updates;
 	let description = current.description ?? '';
+	const protectedLabels = [
+		...Object.values(METADATA_LABELS),
+		...Object.keys(current.custom_fields ?? {}),
+		...Object.keys(updates.custom_fields ?? {}),
+	];
 	let changed = false;
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
 		if (!Object.prototype.hasOwnProperty.call(updates, key)) continue;
 		const next = updates[key];
 		if (next === current[key]) continue;
-		description = changeIdentifier(description, label, current[key], next);
+		description = changeIdentifier(description, label, current[key], next, protectedLabels);
 		changed = true;
 	}
 	if (Object.prototype.hasOwnProperty.call(updates, 'custom_fields')) {
@@ -108,7 +136,13 @@ export function reconcileDescriptionMetadata(
 			if (!CUSTOM_IDENTIFIER_NAMES.some((name) => key.toLowerCase().includes(name))) continue;
 			if (FINANCIAL_NAMES.some((name) => key.toLowerCase().includes(name))) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
-			description = changeIdentifier(description, key, oldFields[key], newFields[key]);
+			description = changeIdentifier(
+				description,
+				key,
+				oldFields[key],
+				newFields[key],
+				protectedLabels
+			);
 			changed = true;
 		}
 	}

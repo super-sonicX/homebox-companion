@@ -203,3 +203,27 @@ def test_save_preserves_user_paragraph_breaks_when_reconciling_metadata():
     )
     assert "\n\nSecond paragraph" in cleaned
     assert "WrongCo" not in cleaned
+
+
+def test_generated_manufacturer_with_internal_periods_is_preserved_when_unchanged():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    original = "Relay. Manufacturer: Acme Inc. Ltd."
+    assert (
+        remove_superseded_generated_identifiers(
+            original, manufacturer="Acme Inc. Ltd", explicitly_updated=frozenset({"manufacturer"})
+        )
+        == original
+    )
+
+
+def test_generated_manufacturer_with_internal_periods_is_fully_replaced_or_cleared():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    original = "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1."
+    for replacement in ("NewCo", None):
+        cleaned = remove_superseded_generated_identifiers(
+            original, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+        )
+        assert cleaned == "Relay. Part/model number: P-1."
+        assert "Ltd" not in cleaned

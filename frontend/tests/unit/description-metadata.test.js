@@ -106,3 +106,17 @@ test('metadata correction preserves user-entered paragraph breaks', () => {
 	assert.match(changes.description, /\n\nImportant second paragraph/);
 	assert.match(changes.description, /Manufacturer: RightCo/);
 });
+
+test('editing current leaves voltage intact when both fields shared the same value', () => {
+	const previous = current({
+		description: 'Power supply. Voltage: 12. Current: 12.',
+		custom_fields: { Voltage: '12', Current: '12' },
+	});
+	const changes = reconcileDescriptionMetadata(previous, {
+		custom_fields: { Voltage: '12', Current: '24' },
+	});
+	assert.match(changes.description, /Voltage: 12\./);
+	assert.match(changes.description, /Current: 24\./);
+	assert.doesNotMatch(changes.description, /Voltage: 24\./);
+	assert.doesNotMatch(changes.description, /Current: 12\./);
+});
