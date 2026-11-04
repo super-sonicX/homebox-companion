@@ -103,13 +103,13 @@ def aggregate_description(
             continue
         own_clause = re.compile(
             rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}"
-            r"(?=[.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$))",
+            r"(?:(?<=[.;!?])(?=\s|$)|(?=[.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$)))",
             re.IGNORECASE,
         )
         token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
         if own_clause.search(result) or (not require_label and not value.isdecimal() and token.search(narrative)):
             continue
-        phrase = f"{label}: {value}."
+        phrase = f"{label}: {value}" if value[-1] in ".;!?" else f"{label}: {value}."
         if result and result[-1] not in ".;!?":
             result += "."
         result = f"{result} {phrase}".strip()
@@ -156,7 +156,7 @@ def remove_superseded_generated_identifiers(
         alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
             rf"(?P<leading>{CLAUSE_START}){re.escape(label)}:[ \t]*(?P<value>{alternatives})"
-            rf"(?P<end>[.;!?](?=\s|$)|(?=\r?$))",
+            rf"(?P<end>[.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
             re.IGNORECASE | re.MULTILINE,
         )
 

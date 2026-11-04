@@ -351,3 +351,20 @@ async def test_unverified_labelled_content_is_not_deleted_or_written(gateway):
     )
     assert "Cannot safely separate" in response.json()["errors"][0]
     gateway.create_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("submitted", ["Acme Inc.", "NewCo Ltd.", None])
+async def test_single_terminal_period_in_company_name_precedes_other_metadata(gateway, submitted):
+    description = "Relay. Manufacturer: Acme Inc. Part/model number: P-1. Keep dry."
+    item = {"name": "Relay", "description": description, "manufacturer": submitted, "model_number": "P-1"}
+    if submitted != "Acme Inc.":
+        item["previous_identifiers"] = {"manufacturer": "Acme Inc."}
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = "Relay. Part/model number: P-1. Keep dry."
+    if submitted == "Acme Inc.":
+        expected = description
+    elif submitted:
+        expected += " Manufacturer: NewCo Ltd."
+    assert gateway.create_item.call_args.args[0].description == expected

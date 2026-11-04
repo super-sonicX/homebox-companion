@@ -47,7 +47,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
+			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -72,14 +72,16 @@ function changeIdentifier(
 			(_matched, leading: string, punctuation: string) => {
 				if (!newValue || represented) return '';
 				represented = true;
-				return `${leading}${label}: ${newValue}${punctuation}`;
+				const end = punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';
+				return `${leading}${label}: ${newValue}${/[.;!?]$/.test(newValue) ? '' : end}`;
 			}
 		);
 	}
 	if (newValue && !represented) {
 		const before = (parts.narrative + parts.metadata).trimEnd();
 		const separator = !before ? '' : !/[.;!?]$/.test(before) ? '. ' : ' ';
-		parts.metadata = parts.metadata.trimEnd() + separator + `${label}: ${newValue}.`;
+		const end = /[.;!?]$/.test(newValue) ? '' : '.';
+		parts.metadata = parts.metadata.trimEnd() + separator + `${label}: ${newValue}${end}`;
 	}
 }
 

@@ -351,3 +351,24 @@ test('correcting a currency-prefixed technical value replaces just its old label
 		'Controller. Note: receipt says £24.'
 	);
 });
+
+test('a manufacturer ending in a full stop can share the sentence delimiter with later notes', () => {
+	const item = current({
+		description: 'Relay. Manufacturer: Acme Inc. Part/model number: P-1. Keep dry.',
+		manufacturer: 'Acme Inc.',
+	});
+	for (const [manufacturer, clause] of [
+		['NewCo', ' Manufacturer: NewCo.'],
+		['NewCo Ltd.', ' Manufacturer: NewCo Ltd.'],
+		['Yahoo!', ' Manufacturer: Yahoo!'],
+		['', ''],
+	]) {
+		const changed = reconcileDescriptionMetadata(item, { manufacturer });
+		assert.equal(changed.description, 'Relay.' + clause + ' Part/model number: P-1. Keep dry.');
+	}
+	const blank = current({ description: 'Relay.', manufacturer: null });
+	assert.equal(
+		reconcileDescriptionMetadata(blank, { manufacturer: 'Acme Inc.' }).description,
+		'Relay. Manufacturer: Acme Inc.'
+	);
+});
