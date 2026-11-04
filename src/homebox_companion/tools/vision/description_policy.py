@@ -50,6 +50,7 @@ HISTORICAL_HEADING = re.compile(r"^(?:previous|original|former|compatible|altern
 COMPATIBILITY_REFERENCE = re.compile(
     r"\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b", re.I
 )
+MAKER_ATTRIBUTION = re.compile(r"\b(?:made|manufactured) by[ \t]*\Z", re.I)
 FOR_TARGET = re.compile(r"\bfor\b(?! (?:example|instance)\b)", re.I)
 NARRATIVE_FIELD_CUES = {
     "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
@@ -117,7 +118,8 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
         sentence = _sentence_prefix(before)
         if COMPATIBILITY_REFERENCE.search(sentence) or FOR_TARGET.search(sentence):
             _, comma, field_prefix = sentence.rpartition(",")
-            if not (comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())):
+            separate_field = comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())
+            if not separate_field and not (cue == "Manufacturer" and MAKER_ATTRIBUTION.search(sentence)):
                 continue
         if cue == label or (cue is None and distinctive):
             return True

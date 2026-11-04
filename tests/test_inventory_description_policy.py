@@ -593,3 +593,10 @@ def test_an_adapter_target_introduced_by_for_does_not_supply_its_manufacturer():
 def test_an_adapter_target_cannot_supply_the_items_model_or_serial(field, label):
     text = "Adapter for ABC-123 sockets."
     assert aggregate_description(text, **{field: "ABC-123"}) == f"{text} {label}: ABC-123."
+
+
+@pytest.mark.parametrize("cue", ["made by", "manufactured by"])
+def test_maker_attribution_can_follow_a_target_without_a_comma(cue):
+    text = f"Adapter for Acme sockets {cue} OldCo."
+    assert aggregate_description(text, manufacturer="OldCo") == text
+    assert aggregate_description(text, manufacturer="Acme") == f"{text} Manufacturer: Acme."

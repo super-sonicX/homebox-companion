@@ -685,3 +685,16 @@ test('changing model or serial protects repeated identifiers referenced as compa
 		);
 	}
 });
+
+test('an explicit maker after a fitment target is independent of punctuation', () => {
+	for (const cue of ['made by', 'manufactured by']) {
+		const item = current({
+			description: 'Adapter for OldCo sockets ' + cue + ' OldCo.',
+			manufacturer: 'OldCo',
+		});
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			'Adapter for OldCo sockets ' + cue + ' NewCo.'
+		);
+	}
+});
