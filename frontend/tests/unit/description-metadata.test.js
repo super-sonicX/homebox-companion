@@ -286,3 +286,26 @@ test('an automatically appended identity has a standalone heading on later saves
 	item = { ...item, ...reconcileDescriptionMetadata(item, { model_number: 'OLD-123' }) };
 	assert.equal(item.description, 'Unpunctuated prose. Part/model number: OLD-123.');
 });
+
+test('numeric regulator models change without rewriting matching quantities or ratings', () => {
+	const item = current({
+		name: 'Voltage regulator',
+		model_number: '7805',
+		description: 'A 7805 voltage regulator. Stock count 7805, measured at 7805 mV.',
+	});
+	const update = reconcileDescriptionMetadata(item, { model_number: '7905' });
+	assert.equal(
+		update.description,
+		'A 7905 voltage regulator. Stock count 7805, measured at 7805 mV.'
+	);
+});
+
+test('short numeric identities need a cue specific to their field', () => {
+	const item = current({
+		model_number: '12',
+		serial_number: '34',
+		description: '12 ports, model 12, serial 34, 34 spares.',
+	});
+	const update = reconcileDescriptionMetadata(item, { model_number: '45', serial_number: '67' });
+	assert.equal(update.description, '12 ports, model 45, serial 67, 34 spares.');
+});

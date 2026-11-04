@@ -257,6 +257,7 @@ export interface BatchCreateRequest {
 
 /** Item input for creation (with location) */
 export interface ItemInput extends ItemCore, ItemExtended {
+	previous_identifiers?: Pick<ItemExtended, 'manufacturer' | 'model_number' | 'serial_number'>;
 	location_id?: string | null;
 	parent_id?: string | null;
 	insured?: boolean;

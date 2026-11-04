@@ -239,7 +239,10 @@ def test_generated_manufacturer_with_internal_periods_is_fully_replaced_or_clear
     original = "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1."
     for replacement in ("NewCo", None):
         cleaned = remove_superseded_generated_identifiers(
-            original, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+            original,
+            manufacturer=replacement,
+            previous_identifiers={"manufacturer": "Acme Inc. Ltd"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         assert cleaned == "Relay. Part/model number: P-1."
         assert "Ltd" not in cleaned
@@ -330,7 +333,10 @@ def test_dotted_manufacturer_followed_by_user_prose_is_preserved():
 
     raw = "Relay. Manufacturer: Acme Inc. Ltd. Keep these safety notes."
     cleaned = remove_superseded_generated_identifiers(
-        raw, manufacturer="NewCo", explicitly_updated=frozenset({"manufacturer"})
+        raw,
+        manufacturer="NewCo",
+        previous_identifiers={"manufacturer": "Acme Inc. Ltd"},
+        explicitly_updated=frozenset({"manufacturer"}),
     )
     assert "Keep these safety notes." in cleaned
     assert "Acme Inc. Ltd" not in cleaned
@@ -359,13 +365,19 @@ def test_initialled_dotted_manufacturer_names_are_not_split_into_prose():
     raw = "Relay. Manufacturer: A. O. Smith."
     assert (
         remove_superseded_generated_identifiers(
-            raw, manufacturer="A. O. Smith", explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer="A. O. Smith",
+            previous_identifiers={"manufacturer": "A. O. Smith"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         == raw
     )
     for replacement in ("NewCo", None):
         cleaned = remove_superseded_generated_identifiers(
-            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer=replacement,
+            previous_identifiers={"manufacturer": "A. O. Smith"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         assert cleaned == "Relay."
 
@@ -377,7 +389,10 @@ def test_dotted_manufacturer_names_followed_by_safety_prose_remain_intact():
     raw = "Relay. Manufacturer: A. O. Smith. Keep disconnected until installed."
     for replacement in ("A. O. Smith", "NewCo", None):
         cleaned = remove_superseded_generated_identifiers(
-            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer=replacement,
+            previous_identifiers={"manufacturer": "A. O. Smith"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         assert "Keep disconnected until installed." in cleaned
         if replacement == "A. O. Smith":
@@ -392,13 +407,19 @@ def test_one_initial_plus_surname_is_preserved_or_removed_whole():
     raw = "Relay. Manufacturer: A. Smith."
     assert (
         remove_superseded_generated_identifiers(
-            raw, manufacturer="A. Smith", explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer="A. Smith",
+            previous_identifiers={"manufacturer": "A. Smith"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         == raw
     )
     assert (
         remove_superseded_generated_identifiers(
-            raw, manufacturer="NewCo", explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer="NewCo",
+            previous_identifiers={"manufacturer": "A. Smith"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         == "Relay."
     )
@@ -425,7 +446,10 @@ def test_correcting_dotted_brands_preserves_user_prose(name):
 
     raw = f"Relay. Manufacturer: {name}. Keep disconnected until installed."
     cleaned = remove_superseded_generated_identifiers(
-        raw, manufacturer="NewBrand", explicitly_updated=frozenset({"manufacturer"})
+        raw,
+        manufacturer="NewBrand",
+        previous_identifiers={"manufacturer": name},
+        explicitly_updated=frozenset({"manufacturer"}),
     )
     assert "Keep disconnected until installed." in cleaned
     assert name not in cleaned
@@ -462,3 +486,9 @@ def test_custom_specifications_are_idempotent_after_unpunctuated_narrative():
 def test_punctuated_custom_fields_remain_idempotent(separator):
     description = f"Controller. Voltage: 12V{separator} Current: 2A."
     assert aggregate_description(description, custom_fields={"Voltage": "12V", "Current": "2A"}) == description
+
+
+def test_unrelated_numeric_quantity_does_not_suppress_a_model_number():
+    assert aggregate_description("A switch with 24 ports.", model_number="24") == (
+        "A switch with 24 ports. Part/model number: 24."
+    )

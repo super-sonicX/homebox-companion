@@ -106,7 +106,7 @@ def aggregate_description(
             re.IGNORECASE,
         )
         token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
-        if own_clause.search(result) or (not require_label and token.search(narrative)):
+        if own_clause.search(result) or (not require_label and not value.isdecimal() and token.search(narrative)):
             continue
         phrase = f"{label}: {value}."
         if result and result[-1] not in ".;!?":
@@ -121,41 +121,6 @@ def aggregate_description(
     return result
 
 
-def _split_identifier_and_following_prose(value: str, *, manufacturer: bool) -> tuple[str, str]:
-    """Split a generated field from later sentences without discarding prose.
-
-    A machine-appended label has no provenance marker in older descriptions.
-    Preserve text after the first sentence boundary, except common company
-    legal suffixes such as "Acme Inc. Ltd.". Ambiguous suffixes are retained
-    rather than guessing what can safely be deleted.
-    """
-    for boundary in re.finditer(r"\. +(?=\S)", value):
-        before = value[: boundary.start()].strip()
-        after = value[boundary.end() :].strip()
-        if not manufacturer:
-            return before, after
-        last_word = before.rsplit(" ", 1)[-1]
-        next_word = after.split(" ", 1)[0].strip(".")
-        legal_suffixes = {"inc", "ltd", "co", "corp", "llc", "limited"}
-        if last_word.casefold() in legal_suffixes and next_word.casefold() in legal_suffixes:
-            continue
-        # Common dotted prefixes belong to a manufacturer name, not to a
-        # separate user sentence (for example "St. Jude" or "Dr. Martens").
-        if last_word.casefold() in {"st", "dr", "mr", "mrs", "ms", "prof", "rev"} and next_word[:1].isupper():
-            continue
-        # Initialled manufacturer names such as "A. O. Smith" are one
-        # identifier, not three separate sentences. Avoid extending across
-        # ordinary safety notes that start with a capitalised word.
-        if len(last_word) == 1 and last_word.isupper() and next_word[:1].isupper():
-            if len(next_word) == 1 or ". " in before:
-                continue
-        # A single initial followed by a single surname is also a valid name.
-        if re.fullmatch(r"[A-Z]", before) and re.match(r"^[A-Z][a-z]+(?:\.|$)", after):
-            continue
-        return before, after
-    return value.strip(), ""
-
-
 def remove_superseded_generated_identifiers(
     description: str | None,
     *,
@@ -163,6 +128,7 @@ def remove_superseded_generated_identifiers(
     model_number: str | None = None,
     serial_number: str | None = None,
     explicitly_updated: frozenset[str] = frozenset(),
+    previous_identifiers: dict[str, str | None] | None = None,
 ) -> str:
     """Remove stale *generated* labelled clauses before re-aggregation at save.
 
@@ -182,36 +148,44 @@ def remove_superseded_generated_identifiers(
     for key, (label, expected) in fields.items():
         if key not in explicitly_updated:
             continue
-        # A generated clause ends at the next canonical field or end of text.
-        # This avoids splitting manufacturer values such as "Acme Inc. Ltd".
-        next_label = r"(?:Manufacturer|Part/model number|Serial number):"
+        desired = (expected or "").strip()
+        previous = ((previous_identifiers or {}).get(key) or "").strip()
+        # Match the longest known value first: "A." can start a longer company name.
+        known = sorted({value for value in (previous, desired) if value}, key=len, reverse=True)
+        alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
-            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}:[ \t]*(?P<value>[^\r\n]+?)\."
-            rf"(?=\s+{next_label}|\r?\n|[ \t]*$)",
-            re.IGNORECASE,
+            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}:[ \t]*(?P<value>{alternatives})"
+            rf"(?P<end>[.;!?](?=\s|$)|(?=\r?$))",
+            re.IGNORECASE | re.MULTILINE,
         )
-        # A blank metadata label is not a value; do not read the next paragraph
-        # as its content if the user clears the structured field.
-        text = re.sub(rf"(?m){CLAUSE_START}{re.escape(label)}:[ \t]*(?=\r?$)", "", text)
-        desired = (expected or "").strip().casefold()
 
         def replace_stale(
-            match: re.Match[str], *, desired: str = desired, manufacturer: bool = key == "manufacturer"
+            match: re.Match[str], *, previous: str = previous, desired: str = desired, field: str = key
         ) -> str:
-            """Keep an unchanged value verbatim and retain any user prose after a superseded value."""
-            captured_value = match.group("value").strip()
-            if desired and (
-                captured_value.casefold() == desired or captured_value.casefold().startswith(f"{desired}. ")
-            ):
-                return match.group(0)
-            identifier, following_prose = _split_identifier_and_following_prose(
-                captured_value, manufacturer=manufacturer
-            )
-            if identifier.casefold() == desired:
-                return match.group(0)
-            # The appended metadata is superseded, but a later user sentence
-            # must survive even when it was written on the same line.
-            return f"{match.group('leading')}{following_prose}." if following_prose else ""
+            """Remove just the matched value and delimiter, leaving later sentences untouched."""
+            value = match["value"].strip()
+            if value and value.casefold() == desired.casefold():
+                return match[0]
+            tail = match.string[match.end() :]
+            same_line = tail.partition("\n")[0].strip()
+            if value and value.casefold() != previous.casefold():
+                last_word = value.split()[-1]
+                ambiguous_name = (
+                    field == "manufacturer"
+                    and match["end"] == "."
+                    and same_line
+                    and (
+                        len(last_word) == 1
+                        or last_word.casefold()
+                        in {"inc", "ltd", "co", "corp", "st", "dr", "mr", "mrs", "ms", "prof", "rev"}
+                    )
+                )
+                if previous or ambiguous_name or not match["end"]:
+                    raise ValueError(
+                        f"Cannot safely separate the previous {field} from the description. "
+                        "Correct the labelled text or supply the matching previous_identifiers value."
+                    )
+            return match["leading"] if "\n" in match["leading"] and same_line else ""
 
         text = clause.sub(replace_stale, text)
     return text.strip()

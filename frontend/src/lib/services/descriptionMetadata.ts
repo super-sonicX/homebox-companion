@@ -39,7 +39,7 @@ function changeIdentifier(
 	label: string,
 	previous: string | null | undefined,
 	next: string | null | undefined,
-	isIdentity: boolean
+	identity?: { field: IdentityField; name: string }
 ): void {
 	const oldValue = (previous ?? '').trim();
 	const newValue = (next ?? '').trim();
@@ -52,7 +52,18 @@ function changeIdentifier(
 		);
 	let represented = Boolean(
 		newValue &&
-		((isIdentity && identifierPattern(newValue).test(parts.narrative)) ||
+		((identity &&
+			Array.from(parts.narrative.matchAll(identifierPattern(newValue))).some(
+				(match) =>
+					!/^\d+$/.test(newValue) ||
+					numericIdentityContext(
+						parts.narrative,
+						match.index,
+						newValue,
+						identity.field,
+						identity.name
+					)
+			)) ||
 			clausePattern(newValue).test(parts.metadata))
 	);
 	if (oldValue) {
@@ -100,33 +111,72 @@ const IDENTIFIER_NAME_PATTERN = new RegExp(
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
 
+/** A short number needs an explicit model/serial cue; a leading part designation can precede the product name. */
+function numericIdentityContext(
+	text: string,
+	offset: number,
+	value: string,
+	field: IdentityField,
+	name: string
+): boolean {
+	const before = text.slice(0, offset);
+	const cue =
+		field === 'serial_number'
+			? /\b(?:serial(?:\s+(?:number|no\.?))?|s\/n)\s*[#:=]?\s*$/iu
+			: /\b(?:model(?:\s+(?:number|no\.?))?|part(?:\s+(?:number|no\.?))?|mpn|p\/n)\s*[#:=]?\s*$/iu;
+	if (field === 'manufacturer') return false;
+	if (cue.test(before)) return true;
+	if (
+		field !== 'model_number' ||
+		value.length < 3 ||
+		!/^(?:(?:an?|the)\s+)?$/iu.test(before.trimStart())
+	)
+		return false;
+	const following = text.slice(offset + value.length).trimStart();
+	const product = name.trim().replace(/^(?:an?|the)\s+/iu, '');
+	// Only infer a designation from a product name or an explicit electronics part type.
+	return (
+		(Boolean(product) &&
+			new RegExp('^' + escapeRegex(product) + '(?![\\p{L}\\p{N}_])', 'iu').test(following)) ||
+		/^(?:(?:linear|voltage|switching)\s+regulator|integrated circuit)\b/iu.test(following)
+	);
+}
+
 /** Replace matching original tokens once. A new brand can itself be the old model. */
 function reconcileNarrative(
 	narrative: string,
 	source: DescriptionSource,
-	next: DescriptionSource
+	next: DescriptionSource,
+	itemName: string
 ): string {
-	const replacements = new Map<string, string | null>();
-	for (const field of Object.keys(METADATA_LABELS) as IdentityField[]) {
-		const oldValue = (source[field] ?? '').trim();
-		if (!/[\p{L}_/-]/u.test(oldValue) || oldValue.length < (field === 'manufacturer' ? 2 : 3))
-			continue;
-		const key = oldValue.toLocaleLowerCase();
-		const newValue = (next[field] ?? '').trim();
-		const replacement = newValue && newValue !== oldValue ? newValue : null;
-		replacements.set(
-			key,
-			replacements.has(key) && replacements.get(key) !== replacement ? null : replacement
+	const identities = (Object.keys(METADATA_LABELS) as IdentityField[])
+		.map((field) => ({
+			field,
+			original: (source[field] ?? '').trim(),
+			replacement: (next[field] ?? '').trim(),
+		}))
+		.filter(
+			({ field, original }) =>
+				/^\d+$/.test(original) ||
+				(/[\p{L}_/-]/u.test(original) && original.length >= (field === 'manufacturer' ? 2 : 3))
 		);
-	}
-	if (!replacements.size) return narrative;
+	if (!identities.length) return narrative;
 	const pattern = identifierPattern(
-		...Array.from(replacements.keys()).sort((a, b) => b.length - a.length)
+		...identities.map(({ original }) => original).sort((a, b) => b.length - a.length)
 	);
-	return narrative.replace(
-		pattern,
-		(matched) => replacements.get(matched.toLocaleLowerCase()) ?? matched
-	);
+	return narrative.replace(pattern, (matched, offset: number) => {
+		const owners = identities.filter(
+			({ field, original }) =>
+				original.toLocaleLowerCase() === matched.toLocaleLowerCase() &&
+				(!/^\d+$/.test(original) ||
+					numericIdentityContext(narrative, offset, original, field, itemName))
+		);
+		const [first] = owners;
+		if (!first?.replacement || first.original === first.replacement) return matched;
+		return owners.every((owner) => owner.replacement === first.replacement)
+			? first.replacement
+			: matched;
+	});
 }
 
 /** Preserve explicit description edits; re-render automatic edits from the last authored description. */
@@ -159,14 +209,14 @@ export function reconcileDescriptionMetadata(
 	];
 	const boundary = narrativeBoundary(description, protectedLabels);
 	const parts = {
-		narrative: reconcileNarrative(description.slice(0, boundary), source, next),
+		narrative: reconcileNarrative(description.slice(0, boundary), source, next, next.name),
 		metadata: description.slice(boundary),
 	};
 	let changed = false;
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
 		if (next[key] === source[key]) continue;
-		changeIdentifier(parts, label, source[key], next[key], true);
+		changeIdentifier(parts, label, source[key], next[key], { field: key, name: next.name });
 		changed = true;
 	}
 	if (source.custom_fields || next.custom_fields) {
@@ -177,7 +227,7 @@ export function reconcileDescriptionMetadata(
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
 			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
-			changeIdentifier(parts, key, oldFields[key], newFields[key], false);
+			changeIdentifier(parts, key, oldFields[key], newFields[key]);
 			changed = true;
 		}
 	}

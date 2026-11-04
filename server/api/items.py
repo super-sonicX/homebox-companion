@@ -135,6 +135,7 @@ async def create_items(
                     model_number=item_input.model_number,
                     serial_number=item_input.serial_number,
                     explicitly_updated=frozenset(item_input.model_fields_set),
+                    previous_identifiers=item_input.previous_identifiers,
                 ),
                 parent_id=parent_id,
                 tag_ids=validated_tag_ids if validated_tag_ids else None,

@@ -72,6 +72,13 @@ test('clearing a heading keeps its following note protected after reload and a s
 			],
 		})
 	);
+	let submitted: Record<string, unknown> | undefined;
+	api.on('POST', '/api/items', (request) => {
+		submitted = request.postDataJSON().items[0];
+		return json(createdItem('saved'));
+	});
+	api.on('PUT', '/api/items/saved', () => json({}));
+	api.on('POST', '/api/items/saved/attachments', () => json({}));
 	await selectLocation(page);
 	await uploadPhoto(page);
 	await analyzePhotos(page);
@@ -82,6 +89,14 @@ test('clearing a heading keeps its following note protected after reload and a s
 	await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
 		'Relay. Safety: OLD-123 is hazardous. Part/model number: NEW-456.'
 	);
+	await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+	await page.getByRole('button', { name: /Submit All Items/ }).click();
+	await expect(page).toHaveURL(/\/success$/);
+	expect(submitted?.previous_identifiers).toMatchObject({
+		manufacturer: 'WrongCo',
+		model_number: 'OLD-123',
+	});
+	expect(submitted).not.toHaveProperty('descriptionSource');
 });
 
 test('unconfirmed rich edits and ordered replacement photos recover, including summary editing', async ({

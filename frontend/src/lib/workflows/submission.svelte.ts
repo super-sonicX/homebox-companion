@@ -223,6 +223,13 @@ export class SubmissionService {
 				name: confirmedItem.name,
 				quantity: confirmedItem.quantity,
 				description: confirmedItem.description,
+				previous_identifiers: confirmedItem.descriptionSource
+					? {
+							manufacturer: confirmedItem.descriptionSource.manufacturer,
+							model_number: confirmedItem.descriptionSource.model_number,
+							serial_number: confirmedItem.descriptionSource.serial_number,
+						}
+					: undefined,
 				tag_ids: confirmedItem.tag_ids,
 				parent_id: parentId,
 				manufacturer: confirmedItem.manufacturer,

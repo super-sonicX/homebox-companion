@@ -223,6 +223,7 @@ async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway
             {
                 "name": "Relay",
                 "description": "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1.",
+                "previous_identifiers": {"manufacturer": "Acme Inc. Ltd"},
                 "manufacturer": "NewCo",
                 "model_number": "P-1",
             }
@@ -247,6 +248,7 @@ async def test_create_never_drops_user_safety_notes_after_generated_metadata(gat
                 "name": "Relay",
                 "description": f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed.",
                 "manufacturer": submitted_manufacturer,
+                **({"previous_identifiers": {"manufacturer": manufacturer}} if submitted != "unchanged" else {}),
             }
         ],
     )
@@ -287,3 +289,25 @@ async def test_create_preserves_longer_authored_headings(gateway, label):
     response = await submit(gateway, [{"name": "Adapter", "description": original, field: "NewCo"}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == f"{original} {own}: NewCo."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [None, "X", "X. Flammable"])
+async def test_ambiguous_company_and_warning_require_matching_source(gateway, previous):
+    """The same text can encode either a brand or a warning. Never infer permission to delete the warning."""
+    description = "Relay. Manufacturer: X. Flammable. Keep away from heat."
+    item = {"name": "Relay", "description": description, "manufacturer": "NewCo"}
+    if previous:
+        item["previous_identifiers"] = {"manufacturer": previous}
+    response = await submit(gateway, [item])
+    if previous is None:
+        assert response.status_code == 207
+        assert "Cannot safely separate" in response.json()["errors"][0]
+        gateway.create_item.assert_not_awaited()
+    else:
+        assert response.status_code == 200
+        note = "Flammable. " if previous == "X" else ""
+        assert (
+            gateway.create_item.call_args.args[0].description
+            == f"Relay. {note}Keep away from heat. Manufacturer: NewCo."
+        )
