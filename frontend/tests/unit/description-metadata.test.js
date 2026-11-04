@@ -475,3 +475,21 @@ test('field wording on a previous line cannot claim a shared brand and model', (
 		);
 	}
 });
+
+test('colon-bearing model and serial cues are editable before protected authored headings', () => {
+	const item = current({
+		description: 'Device, model: ABC-123, serial: ABC-123. Safety: model: ABC-123 is recalled.',
+		model_number: 'ABC-123',
+		serial_number: 'ABC-123',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { model_number: 'DEF-456', serial_number: 'XYZ-789' })
+			.description,
+		'Device, model: DEF-456, serial: XYZ-789. Safety: model: ABC-123 is recalled.'
+	);
+	const previous = current({ description: 'Previous model: ABC-123.', model_number: 'ABC-123' });
+	assert.equal(
+		reconcileDescriptionMetadata(previous, { model_number: 'DEF-456' }).description,
+		'Previous model: ABC-123. Part/model number: DEF-456.'
+	);
+});

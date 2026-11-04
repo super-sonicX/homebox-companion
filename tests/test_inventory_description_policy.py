@@ -524,3 +524,9 @@ def test_a_model_cue_on_another_line_cannot_claim_a_short_brand(newline):
     assert aggregate_description(original, manufacturer="A7", model_number="A7") == (
         f"{original} Part/model number: A7."
     )
+
+
+def test_colon_bearing_identity_cues_are_read_only_before_authored_headings():
+    text = "Device, model: A7, serial: B2. Safety: model: Z9 is recalled."
+    assert aggregate_description(text, model_number="A7", serial_number="B2") == text
+    assert aggregate_description(text, model_number="Z9") == f"{text} Part/model number: Z9."

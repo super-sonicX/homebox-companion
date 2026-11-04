@@ -27,8 +27,18 @@ const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
 /** Keep user-written headings and the notes after them out of narrative replacement. */
 function narrativeBoundary(text: string, labels: readonly string[]): number {
 	const headings = [...labels.map(escapeRegex), String.raw`[^:.;!?\r\n]+`];
-	const match = new RegExp(`${CLAUSE_START}(?:${headings.join('|')})[ \\t]*:`, 'iu').exec(text);
-	return match?.index ?? text.length;
+	const pattern = new RegExp(`${CLAUSE_START}(${headings.join('|')})[ \\t]*:`, 'giu');
+	const protectedNames = new Set(labels.map((label) => label.trim().toLowerCase()));
+	for (const match of text.matchAll(pattern)) {
+		const heading = match[1].trim().toLowerCase();
+		const cue = heading.slice(heading.lastIndexOf(',') + 1).trim();
+		if (
+			protectedNames.has(heading) ||
+			!IDENTITY_CUES.some(({ pattern }) => pattern.exec(cue)?.index === 0)
+		)
+			return match.index;
+	}
+	return text.length;
 }
 
 type DescriptionParts = { narrative: string; metadata: string };

@@ -12,7 +12,6 @@ import re
 MAX_DESCRIPTION_LENGTH = 1000
 # Generated headings start a sentence or a line. A suffix in "Compatible Manufacturer:" is authored text.
 CLAUSE_START = r"(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)"
-AUTHORED_HEADING = re.compile(CLAUSE_START + r"[^:.;!?\r\n]+:[ \t]*(?=\S|$)")
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -42,6 +41,20 @@ NARRATIVE_FIELD_CUES = {
 }
 
 
+def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
+    """Separate narrative identity cues from named fields and authored notes."""
+    labels = [*NARRATIVE_FIELD_CUES, *(custom_fields or {})]
+    protected = {label.strip().casefold() for label in labels}
+    alternatives = "|".join([*(re.escape(label) for label in labels), r"[^:.;!?\r\n]+"])
+    headings = re.compile(rf"{CLAUSE_START}({alternatives})[ \t]*:", re.IGNORECASE)
+    for match in headings.finditer(text):
+        heading = match[1].strip().casefold()
+        cue = heading.rsplit(",", 1)[-1].strip()
+        if heading in protected or not any(pattern.fullmatch(cue) for pattern in NARRATIVE_FIELD_CUES.values()):
+            return text[: match.start()]
+    return text
+
+
 def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
     """Prefer the field named in the prose when an identifier could describe multiple fields."""
     token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
@@ -69,8 +82,7 @@ def aggregate_description(
     Never truncate or discard a part number: overflow is raised to the caller.
     """
     result = (description or "").strip()
-    heading = AUTHORED_HEADING.search(result)
-    narrative = result[: heading.start()] if heading else result
+    narrative = _narrative_prefix(result, custom_fields)
     # Custom technical specifications require field-specific deduplication.
     # A "12" that appears in Voltage must not suppress Current: 12.
     values = [
