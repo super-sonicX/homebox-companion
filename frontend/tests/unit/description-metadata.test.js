@@ -606,3 +606,20 @@ test('decimal sizes and abbreviations do not end a compatibility statement', () 
 		);
 	}
 });
+
+test('metadata on Unicode-separated lines can be changed and cleared without swallowing the note', () => {
+	for (const separator of ['\u2028', '\u2029', '\r', '\u0085']) {
+		const item = current({
+			description: 'Relay' + separator + 'Manufacturer: Acme' + separator + 'Keep dry.',
+			manufacturer: 'Acme',
+		});
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			'Relay' + separator + 'Manufacturer: NewCo' + separator + 'Keep dry.'
+		);
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: '' }).description,
+			'Relay' + separator + 'Keep dry.'
+		);
+	}
+});

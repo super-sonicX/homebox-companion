@@ -10,6 +10,7 @@ const METADATA_LABELS = {
 type IdentityField = keyof typeof METADATA_LABELS;
 const IDENTITY_FIELDS = Object.keys(METADATA_LABELS) as IdentityField[];
 const HSPACE = /[\p{Zs}\t]/u.source;
+const LINE_BREAK = /(?:\r\n|[\r\n\v\f\u0085\u2028\u2029])/u;
 const HORIZONTAL_SPACING = /[\p{Zs}\t]+/gu;
 
 function escapeRegex(value: string): string {
@@ -25,9 +26,9 @@ function identifierPattern(...values: string[]): RegExp {
 }
 
 // Keep this delimiter in sync with description_policy.CLAUSE_START.
-const CLAUSE_START = String.raw`(?:^${HSPACE}*|(?<=[.;!?])${HSPACE}+|\r?\n${HSPACE}*)`;
+const CLAUSE_START = String.raw`(?:^${HSPACE}*|(?<=[.;!?])${HSPACE}+|${LINE_BREAK.source}${HSPACE}*)`;
 
-const HEADING_MARKS = /:|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
+const HEADING_MARKS = /:|[\r\n\v\f\u0085\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
 const HISTORICAL_HEADING =
 	/^(?:previous|original|former|compatible|alternative|historical|replacement)\b/iu;
 
@@ -78,7 +79,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}${HSPACE}*:${HSPACE}*${escapeRegex(value)}(?:([.;!?]?${HSPACE}*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=${HSPACE}*(?:\\r?\\n|$))))`,
+			`(${CLAUSE_START})${escapeRegex(label)}${HSPACE}*:${HSPACE}*${escapeRegex(value)}(?:([.;!?]?${HSPACE}*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=${HSPACE}*(?:${LINE_BREAK.source}|$))))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -98,7 +99,13 @@ function changeIdentifier(
 	if (oldValue) {
 		parts.metadata = parts.metadata.replace(
 			clausePattern(oldValue),
-			(matched: string, leading: string, qualifier: string | undefined, punctuation: string) => {
+			(
+				matched: string,
+				leading: string,
+				qualifier: string | undefined,
+				punctuation: string,
+				offset: number
+			) => {
 				if (qualifier) {
 					if (!identity && newValue && !represented) {
 						represented = true;
@@ -107,7 +114,10 @@ function changeIdentifier(
 					const suffix = matched.slice(leading.length + label.length);
 					return leading + 'Previous ' + label[0].toLowerCase() + label.slice(1) + suffix;
 				}
-				if (!newValue || represented) return '';
+				if (!newValue || represented) {
+					const sameLine = parts.metadata.slice(offset + matched.length).split(LINE_BREAK, 1)[0];
+					return LINE_BREAK.test(leading) && sameLine.trim() ? leading : '';
+				}
 				represented = true;
 				const end = punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';
 				const sharesEnd = end === ',' ? newValue.endsWith(',') : /[.;!?]$/.test(newValue);
@@ -168,7 +178,7 @@ const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = 
 	},
 ];
 
-const SENTENCE_END = /[;!?\r\n\u2028\u2029]|\.(?=\s|$)/gu;
+const SENTENCE_END = /[;!?\r\n\v\f\u0085\u2028\u2029]|\.(?=\s|$)/gu;
 const ABBREVIATION = /\b(?:[a-z]|approx|no|nos|ref|rev|fig|inc|ltd|corp|co|dr|st|mr|mrs|ms|dia)$/iu;
 
 function sentencePrefix(before: string): string {

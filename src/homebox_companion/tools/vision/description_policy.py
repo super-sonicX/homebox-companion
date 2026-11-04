@@ -16,8 +16,10 @@ DESCRIPTION_OVERFLOW = (
 )
 # One Unicode space separator (Zs) or tab, excluding line breaks.
 HSPACE = r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
+LINE_CHARACTERS = r"\r\n\v\f\u0085\u2028\u2029"
+LINE_BREAK = rf"(?:\r\n|[{LINE_CHARACTERS}])"
 # Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
-CLAUSE_START = rf"(?:^{HSPACE}*|(?<=[.;!?]){HSPACE}+|\r?\n{HSPACE}*)"
+CLAUSE_START = rf"(?:^{HSPACE}*|(?<=[.;!?]){HSPACE}+|{LINE_BREAK}{HSPACE}*)"
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -40,7 +42,7 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 # The review editor uses these same cues when correcting prose.
 # Unicode Space_Separator (Zs) plus tab, deliberately excluding line separators.
 HORIZONTAL_SPACING = re.compile(rf"{HSPACE}+")
-HEADING_MARKS = re.compile(rf":|[\r\n\u2028\u2029]|(?<=[,.;!?])(?={HSPACE})")
+HEADING_MARKS = re.compile(rf":|{LINE_BREAK}|(?<=[,.;!?])(?={HSPACE})")
 HISTORICAL_HEADING = re.compile(r"^(?:previous|original|former|compatible|alternative|historical|replacement)\b", re.I)
 COMPATIBILITY_REFERENCE = re.compile(
     r"\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b", re.I
@@ -79,7 +81,7 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     return text
 
 
-SENTENCE_END = re.compile(r"[;!?\r\n\u2028\u2029]|\.(?=\s|$)")
+SENTENCE_END = re.compile(rf"[;!?]|{LINE_BREAK}|\.(?=\s|$)")
 ABBREVIATION = re.compile(r"\b(?:[a-z]|approx|no|nos|ref|rev|fig|inc|ltd|corp|co|dr|st|mr|mrs|ms|dia)\Z", re.I)
 
 
@@ -185,7 +187,7 @@ def aggregate_description(
             raise ValueError(DESCRIPTION_OVERFLOW)
         own_clause = re.compile(
             rf"{CLAUSE_START}{re.escape(label)}{HSPACE}*:{HSPACE}*{re.escape(value)}"
-            rf"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|{HSPACE}*(?:[([]|\r?\n|$)))",
+            rf"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|{HSPACE}*(?:[([]|{LINE_BREAK}|$)))",
             re.IGNORECASE,
         )
         if own_clause.search(result) or (not require_label and _narrative_has_identifier(narrative, value, label)):
@@ -233,11 +235,11 @@ def remove_superseded_generated_identifiers(
         previous = ((previous_identifiers or {}).get(key) or "").strip()
         # Match the longest known value first: "A." can start a longer company name.
         known = sorted({value for value in (previous, desired) if value}, key=len, reverse=True)
-        alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
+        alternatives = "|".join([*(re.escape(value) for value in known), rf"[^{LINE_CHARACTERS}]*?"])
         clause = re.compile(
             rf"(?P<leading>{CLAUSE_START}){re.escape(label)}{HSPACE}*:{HSPACE}*(?P<value>{alternatives})"
-            rf"(?:(?P<qualifier>[.;!?]?{HSPACE}*[([])|[,.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
-            re.IGNORECASE | re.MULTILINE,
+            rf"(?:(?P<qualifier>[.;!?]?{HSPACE}*[([])|[,.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?={LINE_BREAK}|\Z))",
+            re.IGNORECASE,
         )
 
         def replace_stale(
@@ -261,8 +263,8 @@ def remove_superseded_generated_identifiers(
                 # Keep authored annotations with the identity they describe, even after a correction.
                 leading = match["leading"]
                 return f"{leading}Previous {label.lower()}{match[0][len(leading) + len(label) :]}"
-            same_line = match.string[match.end() :].partition("\n")[0].strip()
-            return match["leading"] if "\n" in match["leading"] and same_line else ""
+            same_line = re.split(LINE_BREAK, match.string[match.end() :], maxsplit=1)[0].strip()
+            return match["leading"] if re.search(LINE_BREAK, match["leading"]) and same_line else ""
 
         text = clause.sub(replace_stale, text)
     return text.strip()

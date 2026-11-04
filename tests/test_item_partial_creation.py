@@ -462,3 +462,22 @@ async def test_oversized_technical_value_is_rejected_before_aggregating(gateway)
     assert response.status_code == 207
     assert "1000 characters" in response.json()["errors"][0]
     gateway.create_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\r", "\u0085"])
+@pytest.mark.parametrize("desired", [None, "NewCo"])
+async def test_create_recognizes_unicode_line_boundaries_around_an_identity(gateway, separator, desired):
+    description = f"Relay{separator}Manufacturer: Acme{separator}Keep dry."
+    item = {
+        "name": "Relay",
+        "description": description,
+        "manufacturer": desired,
+        "previous_identifiers": {"manufacturer": "Acme"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = f"Relay{separator}Keep dry."
+    if desired:
+        expected += " Manufacturer: NewCo."
+    assert gateway.create_item.call_args.args[0].description == expected
