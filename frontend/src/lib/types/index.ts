@@ -113,8 +113,17 @@ export interface ThumbnailTransform {
 	dataUrl: string | null;
 }
 
+/** The authored description and structured values before automatic review-form edits. */
+export type DescriptionSource = Pick<ItemCore, 'description'> &
+	Pick<ItemExtended, 'manufacturer' | 'model_number' | 'serial_number'> & {
+		name?: string;
+		custom_fields?: Record<string, string> | null;
+	};
+
 /** Item detected by AI, ready for review */
 export interface ReviewItem extends ItemCore, ItemExtended {
+	/** Draft provenance, kept across recovery and excluded from inventory API payloads. */
+	descriptionSource?: DescriptionSource;
 	/** Internal stable identity; never included in inventory API payloads. */
 	reviewId?: string;
 	/** Index of the source image in capturedImages array */
@@ -249,6 +258,7 @@ export interface BatchCreateRequest {
 
 /** Item input for creation (with location) */
 export interface ItemInput extends ItemCore, ItemExtended {
+	previous_identifiers?: Pick<ItemExtended, 'manufacturer' | 'model_number' | 'serial_number'>;
 	location_id?: string | null;
 	parent_id?: string | null;
 	insured?: boolean;

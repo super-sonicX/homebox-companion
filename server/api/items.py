@@ -21,6 +21,10 @@ from homebox_companion.homebox.relationships import (
     location_override_for_parent,
     preflight_item_placement,
 )
+from homebox_companion.tools.vision.description_policy import (
+    aggregate_description,
+    remove_superseded_generated_identifiers,
+)
 
 from ..dependencies import get_gateway, get_valid_tag_ids, validate_file_size
 from ..schemas.items import BatchCreateRequest
@@ -136,11 +140,29 @@ async def create_items(
                 notes=item_input.notes,
             )
 
+            # A user may edit the detected fields independently before saving.
+            # Reconcile the final submitted values, not just the original AI output.
+            reconciled = remove_superseded_generated_identifiers(
+                detected_item.description,
+                manufacturer=detected_item.manufacturer,
+                model_number=detected_item.model_number,
+                serial_number=detected_item.serial_number,
+                explicitly_updated=frozenset(item_input.model_fields_set),
+                previous_identifiers=item_input.previous_identifiers,
+            )
+            item_description = aggregate_description(
+                reconciled,
+                manufacturer=detected_item.manufacturer,
+                model_number=detected_item.model_number,
+                serial_number=detected_item.serial_number,
+                custom_fields=item_input.custom_fields,
+            )
+
             # Step 1: Create item with basic fields
             item_create = ItemCreate(
                 name=detected_item.name,
                 quantity=detected_item.quantity,
-                description=detected_item.description or "",
+                description=item_description,
                 parent_id=detected_item.parent_id,
                 tag_ids=detected_item.tag_ids,
             )
