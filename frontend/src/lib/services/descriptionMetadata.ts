@@ -24,7 +24,7 @@ function identifierPattern(...values: string[]): RegExp {
 }
 
 // Keep this delimiter in sync with description_policy.CLAUSE_START.
-const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[,.;!?])[ \t]+|\r?\n[ \t]*)`;
+const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
 
 const HEADING_MARKS = /:|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
 const HISTORICAL_HEADING =
@@ -72,7 +72,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}(?:([.;!?]?[ \\t]*[([])|([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$))))`,
+			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}(?:([.;!?]?[ \\t]*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$))))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -104,7 +104,8 @@ function changeIdentifier(
 				if (!newValue || represented) return '';
 				represented = true;
 				const end = punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';
-				return `${leading}${label}: ${newValue}${/[.;!?]$/.test(newValue) ? '' : end}`;
+				const sharesEnd = end === ',' ? newValue.endsWith(',') : /[.;!?]$/.test(newValue);
+				return `${leading}${label}: ${newValue}${sharesEnd ? '' : end}`;
 			}
 		);
 	}

@@ -392,3 +392,28 @@ async def test_create_recognizes_spacing_before_a_label_colon(gateway, gap):
         gateway.create_item.call_args.args[0].description
         == f"Controller. Voltage{gap}: 24V. Keep dry. Manufacturer: NewCo."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [False, True])
+async def test_detected_prose_with_comma_delimited_serial_saves_without_change(gateway, previous):
+    from homebox_companion.tools.vision.description_policy import aggregate_description
+
+    prose = "Device, serial number: SN-123, model ABC-456."
+    fields = {"serial_number": "SN-123", "model_number": "ABC-456"}
+    detected = aggregate_description(prose, **fields)
+    assert detected == prose
+    item = {"name": "Device", "description": detected, **fields}
+    if previous:
+        item["previous_identifiers"] = fields
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == prose
+
+
+@pytest.mark.asyncio
+async def test_canonical_serial_followed_by_a_comma_saves_verbatim(gateway):
+    prose = "Serial number: SN-123, keep dry."
+    response = await submit(gateway, [{"name": "Device", "description": prose, "serial_number": "SN-123"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == prose

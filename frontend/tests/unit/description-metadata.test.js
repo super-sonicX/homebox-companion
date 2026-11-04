@@ -537,3 +537,21 @@ test('a product-prefixed model cue is editable but a comma-delimited warning sta
 		'Cordless drill model: DEF-456, Warning: model: ABC-123 is recalled.'
 	);
 });
+
+test('comma-separated prose can correct both model and serial and retain a warning', () => {
+	const item = current({
+		description: 'Device, serial number: SN-123, model ABC-456, Warning: avoid SN-123.',
+		serial_number: 'SN-123',
+		model_number: 'ABC-456',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { serial_number: 'SN-234', model_number: 'ABC-789' })
+			.description,
+		'Device, serial number: SN-234, model ABC-789, Warning: avoid SN-123.'
+	);
+	const heading = current({ description: 'Manufacturer: Acme, keep dry.', manufacturer: 'Acme' });
+	assert.equal(
+		reconcileDescriptionMetadata(heading, { manufacturer: 'NewCo Inc.' }).description,
+		'Manufacturer: NewCo Inc., keep dry.'
+	);
+});

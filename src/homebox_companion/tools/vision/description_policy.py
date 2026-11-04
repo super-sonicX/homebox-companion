@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 
 MAX_DESCRIPTION_LENGTH = 1000
-# Generated headings start a sentence or a line. A suffix in "Compatible Manufacturer:" is authored text.
-CLAUSE_START = r"(?:^[ \t]*|(?<=[,.;!?])[ \t]+|\r?\n[ \t]*)"
+# Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
+CLAUSE_START = r"(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)"
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -150,7 +150,7 @@ def aggregate_description(
             continue
         own_clause = re.compile(
             rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}"
-            r"(?:(?<=[.;!?])(?=\s|$)|(?=[.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$)))",
+            r"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$)))",
             re.IGNORECASE,
         )
         if own_clause.search(result) or (not require_label and _narrative_has_identifier(narrative, value, label)):
@@ -202,7 +202,7 @@ def remove_superseded_generated_identifiers(
         alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
             rf"(?P<leading>{CLAUSE_START}){re.escape(label)}[ \t]*:[ \t]*(?P<value>{alternatives})"
-            r"(?:(?P<qualifier>[.;!?]?[ \t]*[([])|[.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
+            r"(?:(?P<qualifier>[.;!?]?[ \t]*[([])|[,.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
             re.IGNORECASE | re.MULTILINE,
         )
 
