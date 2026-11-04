@@ -66,6 +66,42 @@ test('model edits survive keystrokes, photo replacement and draft recovery', asy
 	await expect(description).toHaveValue('Revised note, model ZZZ-8.');
 });
 
+test('confirming an untouched item sends its original identifiers including null', async ({
+	page,
+	api,
+}) => {
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Relay',
+					quantity: 1,
+					manufacturer: 'Acme',
+					serial_number: null,
+					description: 'Manufacturer: Acme Corp. Serial number: unknown.',
+				},
+			],
+		})
+	);
+	let submitted: Record<string, unknown> | undefined;
+	api.on('POST', '/api/items', (request) => {
+		submitted = request.postDataJSON().items[0];
+		return json(createdItem('saved'));
+	});
+	api.on('PUT', '/api/items/saved', () => json({}));
+	api.on('POST', '/api/items/saved/attachments', () => json({}));
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+	await page.getByRole('button', { name: /Submit All Items/ }).click();
+	await expect(page).toHaveURL(/\/success$/);
+	expect(submitted?.previous_identifiers).toMatchObject({
+		manufacturer: 'Acme',
+		serial_number: null,
+	});
+});
+
 test('clearing a heading keeps its following note protected after reload and a second edit', async ({
 	page,
 	api,

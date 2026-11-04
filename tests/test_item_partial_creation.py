@@ -178,6 +178,29 @@ async def test_create_does_not_duplicate_identifiers_already_in_description(gate
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("manufacturer", "authored", "expected"),
+    [
+        ("Acme", "Manufacturer: Acme Corp.", "Manufacturer: Acme Corp. Manufacturer: Acme."),
+        (None, "Manufacturer: unknown.", "Manufacturer: unknown."),
+    ],
+)
+async def test_untouched_manufacturer_preserves_authored_text_while_clearing_model(
+    gateway, manufacturer, authored, expected
+):
+    item = {
+        "name": "Relay",
+        "description": f"{authored} Part/model number: OLD-123.",
+        "manufacturer": manufacturer,
+        "model_number": None,
+        "previous_identifiers": {"manufacturer": manufacturer, "model_number": "OLD-123"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
 async def test_create_removes_old_generated_identifiers_from_edited_fields(gateway):
     """Check the exact identity passed to Homebox after a user corrects the detection."""
     response = await submit(

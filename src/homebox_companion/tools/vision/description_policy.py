@@ -234,7 +234,8 @@ def remove_superseded_generated_identifiers(
     Fields omitted by external clients are deliberately not interpreted as
     a request to erase existing narrative content.
     """
-    if any(value and len(value) > 255 for value in (previous_identifiers or {}).values()):
+    originals = previous_identifiers or {}
+    if any(value and len(value) > 255 for value in originals.values()):
         raise ValueError("Previous identifiers must be at most 255 characters.")
     text = (description or "").strip()
     fields = {
@@ -246,7 +247,10 @@ def remove_superseded_generated_identifiers(
         if key not in explicitly_updated:
             continue
         desired = (expected or "").strip()
-        previous = ((previous_identifiers or {}).get(key) or "").strip()
+        previous = (originals.get(key) or "").strip()
+        # The review form also submits untouched identifiers, including explicit nulls.
+        if key in originals and previous == desired:
+            continue
         # Match the longest known value first: "A." can start a longer company name.
         known = sorted({value for value in (previous, desired) if value}, key=len, reverse=True)
         alternatives = "|".join([*(re.escape(value) for value in known), rf"[^{LINE_CHARACTERS}]*?"])
