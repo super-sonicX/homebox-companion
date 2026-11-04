@@ -101,7 +101,7 @@ def aggregate_description(
             # technical specification. The start/punctuation boundary avoids
             # confusing "Voltage" with a longer "Activation Voltage" label.
             token = re.compile(
-                rf"(?:^|[.;!?]\s+|\n+){re.escape(label)}\s*:\s*{re.escape(value)}(?=\.(?:\s|$)|$)",
+                rf"(?:^|[.;!?]\s+|\n+){re.escape(label)}\s*:\s*{re.escape(value)}(?=[.;!?](?:\s|$)|$)",
                 re.IGNORECASE,
             )
         else:
@@ -121,7 +121,7 @@ def aggregate_description(
     return result
 
 
-def _split_identifier_and_following_prose(value: str) -> tuple[str, str]:
+def _split_identifier_and_following_prose(value: str, *, manufacturer: bool) -> tuple[str, str]:
     """Split a generated field from later sentences without discarding prose.
 
     A machine-appended label has no provenance marker in older descriptions.
@@ -132,6 +132,8 @@ def _split_identifier_and_following_prose(value: str) -> tuple[str, str]:
     for boundary in re.finditer(r"\. +(?=\S)", value):
         before = value[: boundary.start()].strip()
         after = value[boundary.end() :].strip()
+        if not manufacturer:
+            return before, after
         last_word = before.rsplit(" ", 1)[-1]
         next_word = after.split(" ", 1)[0].strip(".")
         legal_suffixes = {"inc", "ltd", "co", "corp", "llc", "limited"}
@@ -192,14 +194,18 @@ def remove_superseded_generated_identifiers(
         text = re.sub(rf"(?m)(?<!\S){re.escape(label)}:[ \t]*(?=\r?$)", "", text)
         desired = (expected or "").strip().casefold()
 
-        def replace_stale(match: re.Match[str], *, desired: str = desired) -> str:
+        def replace_stale(
+            match: re.Match[str], *, desired: str = desired, manufacturer: bool = key == "manufacturer"
+        ) -> str:
             """Keep an unchanged value verbatim and retain any user prose after a superseded value."""
             captured_value = match.group("value").strip()
             if desired and (
                 captured_value.casefold() == desired or captured_value.casefold().startswith(f"{desired}. ")
             ):
                 return match.group(0)
-            identifier, following_prose = _split_identifier_and_following_prose(captured_value)
+            identifier, following_prose = _split_identifier_and_following_prose(
+                captured_value, manufacturer=manufacturer
+            )
             if identifier.casefold() == desired:
                 return match.group(0)
             # The appended metadata is superseded, but a later user sentence

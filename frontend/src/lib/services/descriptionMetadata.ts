@@ -68,61 +68,55 @@ function belongsToLongerLabel(
 	});
 }
 
-/** Update one labelled clause while protecting other fields and any unrelated narrative. */
+type DescriptionParts = { narrative: string; metadata: string };
+
+/** Update one field without promoting notes after a removed heading into editable narrative. */
 function changeIdentifier(
-	text: string,
+	parts: DescriptionParts,
 	label: string,
 	previous: string | null | undefined,
 	next: string | null | undefined,
-	protectedLabels: readonly string[]
-): string {
+	protectedLabels: readonly string[],
+	isIdentity: boolean
+): void {
 	const oldValue = (previous ?? '').trim();
 	const newValue = (next ?? '').trim();
-	if (oldValue === newValue) return text;
+	if (oldValue === newValue) return;
 
-	const isIdentity = Object.values(METADATA_LABELS).some((name) => name === label);
-	if (oldValue) {
-		// Remove only the canonical clause belonging to the edited field.
-		const generated = new RegExp(
-			`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(oldValue)}\\.(?=\\s|$)`,
+	const distinctive =
+		/[\p{L}_/-]/u.test(oldValue) && oldValue.length >= (label === 'Manufacturer' ? 2 : 3);
+	if (isIdentity && distinctive && newValue) {
+		parts.narrative = parts.narrative.replace(identifierPattern(oldValue), () => newValue);
+	}
+
+	const clausePattern = (value: string) =>
+		new RegExp(
+			`(^|\\s+)${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?])(?=\\s|$)`,
 			'giu'
 		);
-		text = text
-			.replace(generated, (matched, offset: number) =>
-				belongsToLongerLabel(text, offset, label, protectedLabels) ? matched : ' '
-			)
-			.trim();
-		// If the AI also mentioned the old value in functional prose, update it.
-		// Everything from the first known metadata heading onward is protected.
-		// Technical readings such as Capacity=1 must never change unrelated
-		// prose (e.g. "1 port"). Only distinct identity values may be updated
-		// outside their own labelled clauses; numeric-only values are ambiguous.
-		const distinctive =
-			/[\p{L}_/-]/u.test(oldValue) && oldValue.length >= (label === 'Manufacturer' ? 2 : 3);
-		if (isIdentity && distinctive && newValue) {
-			const boundary = narrativeBoundary(text, protectedLabels);
-			text =
-				text.slice(0, boundary).replace(identifierPattern(oldValue), () => newValue) +
-				text.slice(boundary);
-		}
-	}
-
-	const boundary = narrativeBoundary(text, protectedLabels);
-	const mentionedInNarrative =
-		isIdentity && newValue && identifierPattern(newValue).test(text.slice(0, boundary));
-	const matchingOwnClausePattern =
+	let represented = Boolean(
 		newValue &&
-		new RegExp(`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(newValue)}\\.(?=\\s|$)`, 'giu');
-	const matchingOwnClause =
-		!!matchingOwnClausePattern &&
-		Array.from(text.matchAll(matchingOwnClausePattern)).some(
-			(match) => !belongsToLongerLabel(text, match.index, label, protectedLabels)
+		((isIdentity && identifierPattern(newValue).test(parts.narrative)) ||
+			Array.from(parts.metadata.matchAll(clausePattern(newValue))).some(
+				(match) => !belongsToLongerLabel(parts.metadata, match.index, label, protectedLabels)
+			))
+	);
+	if (oldValue) {
+		parts.metadata = parts.metadata.replace(
+			clausePattern(oldValue),
+			(matched, leading: string, punctuation: string, offset: number) => {
+				if (belongsToLongerLabel(parts.metadata, offset, label, protectedLabels)) return matched;
+				if (!newValue || represented) return '';
+				represented = true;
+				return `${leading}${label}: ${newValue}${punctuation}`;
+			}
 		);
-	if (newValue && !mentionedInNarrative && !matchingOwnClause) {
-		if (!isIdentity && text && !/[.;!?]$/.test(text.trim())) text = text.trimEnd() + '.';
-		text = `${text.trim()} ${label}: ${newValue}.`.trim();
 	}
-	return text.replace(/[ \t]{2,}/g, ' ').trim();
+	if (newValue && !represented) {
+		const before = (parts.narrative + parts.metadata).trimEnd();
+		const separator = !before ? '' : !isIdentity && !/[.;!?]$/.test(before) ? '. ' : ' ';
+		parts.metadata = parts.metadata.trimEnd() + separator + `${label}: ${newValue}.`;
+	}
 }
 
 const CUSTOM_IDENTIFIER_NAMES = [
@@ -159,19 +153,24 @@ export function reconcileDescriptionMetadata(
 	updates: Partial<ReviewItem>
 ): Partial<ReviewItem> {
 	if (Object.prototype.hasOwnProperty.call(updates, 'description')) return updates;
-	let description = current.description ?? '';
+	const description = current.description ?? '';
 	const protectedLabels = [
 		...Object.values(METADATA_LABELS),
 		...Object.keys(current.custom_fields ?? {}),
 		...Object.keys(updates.custom_fields ?? {}),
 	];
+	const boundary = narrativeBoundary(description, protectedLabels);
+	const parts = {
+		narrative: description.slice(0, boundary),
+		metadata: description.slice(boundary),
+	};
 	let changed = false;
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
 		if (!Object.prototype.hasOwnProperty.call(updates, key)) continue;
 		const next = updates[key];
 		if (next === current[key]) continue;
-		description = changeIdentifier(description, label, current[key], next, protectedLabels);
+		changeIdentifier(parts, label, current[key], next, protectedLabels, true);
 		changed = true;
 	}
 	if (Object.prototype.hasOwnProperty.call(updates, 'custom_fields')) {
@@ -182,15 +181,9 @@ export function reconcileDescriptionMetadata(
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
 			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
-			description = changeIdentifier(
-				description,
-				key,
-				oldFields[key],
-				newFields[key],
-				protectedLabels
-			);
+			changeIdentifier(parts, key, oldFields[key], newFields[key], protectedLabels, false);
 			changed = true;
 		}
 	}
-	return changed ? { ...updates, description } : updates;
+	return changed ? { ...updates, description: (parts.narrative + parts.metadata).trim() } : updates;
 }

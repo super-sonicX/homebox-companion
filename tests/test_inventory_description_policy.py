@@ -456,3 +456,9 @@ def test_custom_specifications_are_idempotent_after_unpunctuated_narrative():
     fields = {"Current": "12"}
     description = aggregate_description("Controller", custom_fields=fields)
     assert aggregate_description(description, custom_fields=fields) == description
+
+
+@pytest.mark.parametrize("separator", [";", ".", "!", "?"])
+def test_punctuated_custom_fields_remain_idempotent(separator):
+    description = f"Controller. Voltage: 12V{separator} Current: 2A."
+    assert aggregate_description(description, custom_fields={"Voltage": "12V", "Current": "2A"}) == description

@@ -216,3 +216,33 @@ test('an unrelated number in prose cannot suppress a labelled custom field', () 
 	const updates = reconcileDescriptionMetadata(previous, { custom_fields: { Capacity: '2' } });
 	assert.equal(updates.description, 'Converter with 2 ports. Capacity: 2.');
 });
+
+test('a manufacturer correction preserves the entire note after the last metadata heading', () => {
+	for (const note of [
+		'Safety: WrongCo solvent is hazardous.',
+		'Safety: RightCo solvent is hazardous.',
+	]) {
+		const previous = current({
+			description: 'Relay. Manufacturer: WrongCo. ' + note,
+			manufacturer: 'WrongCo',
+		});
+		const updates = reconcileDescriptionMetadata(previous, { manufacturer: 'RightCo' });
+		assert.equal(updates.description, 'Relay. Manufacturer: RightCo. ' + note);
+	}
+});
+
+test('a bulk clear and replacement keep the original boundary for every field', () => {
+	const previous = current({
+		description: 'Relay. Manufacturer: WrongCo. Safety: OLD-123 is hazardous.',
+		manufacturer: 'WrongCo',
+		model_number: 'OLD-123',
+	});
+	const updates = reconcileDescriptionMetadata(previous, {
+		manufacturer: null,
+		model_number: 'NEW-456',
+	});
+	assert.equal(
+		updates.description,
+		'Relay. Safety: OLD-123 is hazardous. Part/model number: NEW-456.'
+	);
+});

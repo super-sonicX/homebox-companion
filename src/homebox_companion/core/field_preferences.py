@@ -73,7 +73,10 @@ class FieldPreferences(BaseSettings):
     )
 
     # Description instructions - env var: HBC_AI_DESCRIPTION
-    description: str = "One concise functional sentence: what item is/does, important specs, manufacturer and part numbers; not packaging narration. Max 1000 chars, NEVER mention quantity unless essential to identify a kit."
+    description: str = (
+        "One concise functional sentence: what item is/does, important specs, manufacturer and part numbers; "
+        "not packaging narration. Max 1000 chars, NEVER mention quantity unless essential to identify a kit."
+    )
 
     # Quantity counting instructions - env var: HBC_AI_QUANTITY
     quantity: str = "Count identical items together, separate different variants"

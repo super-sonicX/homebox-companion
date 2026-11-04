@@ -259,3 +259,16 @@ async def test_create_never_drops_user_safety_notes_after_generated_metadata(gat
         assert created.description == "Relay. Keep disconnected until installed."
     else:
         assert created.description == f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "label"), [("model_number", "Part/model number"), ("serial_number", "Serial number")]
+)
+async def test_single_character_identifier_correction_preserves_short_warnings(gateway, field, label):
+    response = await submit(
+        gateway,
+        [{"name": "Relay", "description": f"Relay. {label}: X. Flammable. Keep away from heat.", field: "Y"}],
+    )
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"Relay. Flammable. Keep away from heat. {label}: Y."
