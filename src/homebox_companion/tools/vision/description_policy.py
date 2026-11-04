@@ -68,6 +68,10 @@ def aggregate_description(
         "compatibility",
         "capacity",
     )
+    identifier_name = re.compile(
+        rf"(?<!\w)(?:{'|'.join(re.escape(term) for term in relevant_custom_identifiers)})(?!\w)",
+        re.IGNORECASE,
+    )
     financial_name = re.compile(
         r"(?<!\w)(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?!\w)",
         re.IGNORECASE,
@@ -77,7 +81,7 @@ def aggregate_description(
         if (
             name
             and value
-            and any(term in name for term in relevant_custom_identifiers)
+            and identifier_name.search(name)
             and not financial_name.search(name)
             and not str(value).strip().startswith(("£", "$", "€"))
         ):
@@ -102,6 +106,26 @@ def aggregate_description(
             "Shorten the narrative without dropping manufacturer or part details."
         )
     return result
+
+
+def _split_identifier_and_following_prose(value: str) -> tuple[str, str]:
+    """Split a generated field from later sentences without discarding prose.
+
+    A machine-appended label has no provenance marker in older descriptions.
+    Preserve text after the first sentence boundary, except common company
+    legal suffixes such as "Acme Inc. Ltd.". Ambiguous suffixes are retained
+    rather than guessing what can safely be deleted.
+    """
+    for boundary in re.finditer(r"\. +(?=\S)", value):
+        before = value[: boundary.start()].strip()
+        after = value[boundary.end() :].strip()
+        last_word = before.rsplit(" ", 1)[-1].casefold()
+        next_word = after.split(" ", 1)[0].casefold().strip(".")
+        legal_suffixes = {"inc", "ltd", "co", "corp", "llc", "limited"}
+        if last_word in legal_suffixes and next_word in legal_suffixes:
+            continue
+        return before, after
+    return value.strip(), ""
 
 
 def remove_superseded_generated_identifiers(
@@ -143,7 +167,12 @@ def remove_superseded_generated_identifiers(
         desired = (expected or "").strip().casefold()
 
         def replace_stale(match: re.Match[str], *, desired: str = desired) -> str:
-            return match.group(0) if match.group("value").strip().casefold() == desired else ""
+            identifier, following_prose = _split_identifier_and_following_prose(match.group("value"))
+            if identifier.casefold() == desired:
+                return match.group(0)
+            # The appended metadata is superseded, but a later user sentence
+            # must survive even when it was written on the same line.
+            return f"{following_prose}." if following_prose else ""
 
         text = clause.sub(replace_stale, text)
     return re.sub(r"[ \t]{2,}", " ", text).strip()

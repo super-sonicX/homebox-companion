@@ -26,8 +26,12 @@ def test_aggregates_manufacturer_and_part_number_without_sacrificing_structured_
     assert item.manufacturer == "Peugeot"
     assert item.model_number == "PG4301005"
     assert "Peugeot" in item.description
-    assert "Part/model number: PG4301005." in item.description
-    assert "PG4301005" in item.model_dump(by_alias=True)["description"]
+    # The Pydantic transport model must not aggregate identifiers before the
+    # API can convert overflows into an actionable validation response.
+    assert item.description == "Peugeot 308 front bumper mounting brackets for both sides."
+    display = aggregate_description(item.description, manufacturer=item.manufacturer, model_number=item.model_number)
+    assert "Part/model number: PG4301005." in display
+    assert item.model_dump(by_alias=True)["description"] == item.description
 
 
 def test_idempotent_if_manufacturer_and_part_number_already_present():
@@ -37,7 +41,8 @@ def test_idempotent_if_manufacturer_and_part_number_already_present():
 
 def test_serial_number_is_also_retrievable_without_full_detail_fetch():
     item = DetectedItem(name="Multimeter", description="Portable digital multimeter.", serialNumber="SN-2026-A1")
-    assert "Serial number: SN-2026-A1." in item.description
+    display = aggregate_description(item.description, serial_number=item.serial_number)
+    assert "Serial number: SN-2026-A1." in display
 
 
 def test_relevant_custom_part_numbers_are_preserved_but_price_is_not():
@@ -162,8 +167,9 @@ def test_part_number_matches_sentence_period_but_not_version_suffix():
 
 
 @pytest.mark.asyncio
-async def test_detection_returns_actionable_422_for_long_custom_identifier(monkeypatch):
-    """Exercise the API boundary, not only its helper: overflowing custom data is a 422."""
+@pytest.mark.parametrize("overflow_source", ["custom", "manufacturer"])
+async def test_detection_returns_actionable_422_for_long_identifiers(monkeypatch, overflow_source):
+    """Actual HTTP path reports a guarded error, whether overflow is from AI metadata or a custom field."""
     import io
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -183,9 +189,17 @@ async def test_detection_returns_actionable_422_for_long_custom_identifier(monke
         tags=[], field_preferences=None, output_language=None, custom_fields=[], default_tag_id=None
     )
     app.dependency_overrides[require_llm_configured] = lambda: "test-key"
-    detected = DetectedItem(name="Bumper bracket", description="x" * 995)
+    from homebox_companion.tools.vision.models import get_items_adapter
+
+    raw = {"name": "Bumper bracket", "description": "x" * 995}
+    if overflow_source == "manufacturer":
+        raw["manufacturer"] = "ExampleCo"
+    # This exercises the same Pydantic transport adapter used after LLM
+    # responses; its validation must succeed before the guarded API boundary.
+    detected = get_items_adapter(None).validate_python([raw])[0]
     monkeypatch.setattr(vision, "detect_items_from_bytes", AsyncMock(return_value=[detected]))
-    monkeypatch.setattr(vision, "get_custom_fields_dict", lambda item, defs: {"Supplier Part Number": "PG4301005"})
+    custom = {"Supplier Part Number": "PG4301005"} if overflow_source == "custom" else None
+    monkeypatch.setattr(vision, "get_custom_fields_dict", lambda item, defs: custom)
     image = io.BytesIO()
     Image.new("RGB", (8, 8), "white").save(image, format="JPEG")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
@@ -268,3 +282,68 @@ def test_financial_vat_token_does_not_exclude_activation_voltage():
     )
     assert "Activation Voltage: 5V." in result
     assert "VAT-12" not in result
+
+
+def test_ai_validation_defers_overflow_to_guarded_response_boundary():
+    from fastapi import HTTPException
+
+    from homebox_companion.tools.vision.models import get_items_adapter
+    from server.api.tools.vision import aggregate_description_or_422
+
+    raw = "A" * 992
+    parsed = get_items_adapter(None).validate_python(
+        [{"name": "Relay", "description": raw, "manufacturer": "ExampleCo", "modelNumber": "P-1"}]
+    )[0]
+    assert parsed.description == raw
+    with pytest.raises(HTTPException) as error:
+        aggregate_description_or_422(
+            parsed.description, manufacturer=parsed.manufacturer, model_number=parsed.model_number
+        )
+    assert error.value.status_code == 422
+    assert "1000 characters" in str(error.value.detail)
+
+
+def test_superseded_identifiers_preserve_following_user_sentences():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Relay. Manufacturer: Acme. Keep disconnected until installed."
+    assert (
+        remove_superseded_generated_identifiers(
+            raw, manufacturer="Acme", explicitly_updated=frozenset({"manufacturer"})
+        )
+        == raw
+    )
+    for replacement in ("NewCo", None):
+        cleaned = remove_superseded_generated_identifiers(
+            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+        )
+        assert "Keep disconnected until installed." in cleaned
+        assert "Manufacturer: Acme" not in cleaned
+        assert "Relay." in cleaned
+
+
+def test_dotted_manufacturer_followed_by_user_prose_is_preserved():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Relay. Manufacturer: Acme Inc. Ltd. Keep these safety notes."
+    cleaned = remove_superseded_generated_identifiers(
+        raw, manufacturer="NewCo", explicitly_updated=frozenset({"manufacturer"})
+    )
+    assert "Keep these safety notes." in cleaned
+    assert "Acme Inc. Ltd" not in cleaned
+
+
+def test_only_whole_word_technical_field_names_are_aggregated():
+    result = aggregate_description(
+        "Electronic component.",
+        custom_fields={
+            "Storage Preferences": "Personal settings",
+            "Concurrent Users": "5",
+            "Current Rating": "12A",
+            "Supplier Part Number": "A-123",
+        },
+    )
+    assert "Storage Preferences" not in result
+    assert "Concurrent Users" not in result
+    assert "Current Rating: 12A." in result
+    assert "Supplier Part Number: A-123." in result

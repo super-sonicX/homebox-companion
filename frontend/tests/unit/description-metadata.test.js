@@ -169,3 +169,44 @@ test('technical Activation Voltage remains synchronized and VAT Reference is exc
 	assert.match(changes.description, /Activation Voltage: 12V\./);
 	assert.doesNotMatch(changes.description, /Activation Voltage: 5V|VAT-34/);
 });
+
+test('editing shorter label does not erase an overlapping longer label', () => {
+	const previous = current({
+		description: 'Controller. Activation Voltage: 5V. Voltage: 5V.',
+		custom_fields: { 'Activation Voltage': '5V', Voltage: '5V' },
+	});
+	const updates = reconcileDescriptionMetadata(previous, {
+		custom_fields: { 'Activation Voltage': '5V', Voltage: '12V' },
+	});
+	assert.match(updates.description, /Activation Voltage: 5V\./);
+	assert.match(updates.description, /Voltage: 12V\./);
+	assert.equal(updates.description, 'Controller. Activation Voltage: 5V. Voltage: 12V.');
+});
+
+test('clearing identity metadata retains prose without deleting its identifiers', () => {
+	const previous = current({
+		description:
+			'WrongCo brackets, model OLD-123. Manufacturer: WrongCo. Part/model number: OLD-123.',
+		manufacturer: 'WrongCo',
+		model_number: 'OLD-123',
+	});
+	const updates = reconcileDescriptionMetadata(previous, {
+		manufacturer: null,
+		model_number: null,
+	});
+	assert.match(updates.description, /WrongCo brackets, model OLD-123\./);
+	assert.doesNotMatch(updates.description, /Manufacturer: WrongCo\.|Part\/model number: OLD-123\./);
+});
+
+test('custom metadata names must match complete field-name terms', () => {
+	const previous = current({ description: 'Electronic device.', custom_fields: {} });
+	const updates = reconcileDescriptionMetadata(previous, {
+		custom_fields: {
+			'Storage Preferences': 'User layout',
+			'Concurrent Users': '4',
+			'Current Rating': '12A',
+		},
+	});
+	assert.match(updates.description, /Current Rating: 12A\./);
+	assert.doesNotMatch(updates.description, /Storage Preferences|Concurrent Users/);
+});

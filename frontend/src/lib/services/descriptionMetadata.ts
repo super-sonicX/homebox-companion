@@ -31,6 +31,25 @@ function narrativeBoundary(text: string, protectedLabels: readonly string[]): nu
 	return first;
 }
 
+/** Reject matches at the end of a longer protected heading: "Voltage" is
+ * not the same field as "Activation Voltage". Match offsets include the
+ * whitespace preceding the matched label. */
+function belongsToLongerLabel(
+	text: string,
+	offset: number,
+	label: string,
+	protectedLabels: readonly string[]
+): boolean {
+	const lowerLabel = label.toLocaleLowerCase();
+	const before = text.slice(0, offset).toLocaleLowerCase();
+	return protectedLabels.some((other) => {
+		const lowerOther = other.toLocaleLowerCase();
+		if (lowerOther === lowerLabel || !lowerOther.endsWith(` ${lowerLabel}`)) return false;
+		const prefix = lowerOther.slice(0, -lowerLabel.length - 1);
+		return before.endsWith(prefix);
+	});
+}
+
 function changeIdentifier(
 	text: string,
 	label: string,
@@ -48,7 +67,11 @@ function changeIdentifier(
 			`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(oldValue)}\\.(?=\\s|$)`,
 			'giu'
 		);
-		text = text.replace(generated, ' ').trim();
+		text = text
+			.replace(generated, (matched, offset: number) =>
+				belongsToLongerLabel(text, offset, label, protectedLabels) ? matched : ' '
+			)
+			.trim();
 		// If the AI also mentioned the old value in functional prose, update it.
 		// Everything from the first known metadata heading onward is protected.
 		// Technical readings such as Capacity=1 must never change unrelated
@@ -57,7 +80,7 @@ function changeIdentifier(
 		const isIdentity = ['Manufacturer', 'Part/model number', 'Serial number'].includes(label);
 		const distinctive =
 			/[\p{L}_/-]/u.test(oldValue) && oldValue.length >= (label === 'Manufacturer' ? 2 : 3);
-		if (isIdentity && distinctive) {
+		if (isIdentity && distinctive && newValue) {
 			const boundary = narrativeBoundary(text, protectedLabels);
 			text =
 				text.slice(0, boundary).replace(identifierPattern(oldValue), () => newValue) +
@@ -68,12 +91,14 @@ function changeIdentifier(
 	const boundary = narrativeBoundary(text, protectedLabels);
 	const mentionedInNarrative =
 		newValue && identifierPattern(newValue).test(text.slice(0, boundary));
-	const matchingOwnClause =
+	const matchingOwnClausePattern =
 		newValue &&
-		new RegExp(
-			`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(newValue)}\\.(?=\\s|$)`,
-			'iu'
-		).test(text);
+		new RegExp(`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(newValue)}\\.(?=\\s|$)`, 'giu');
+	const matchingOwnClause =
+		!!matchingOwnClausePattern &&
+		Array.from(text.matchAll(matchingOwnClausePattern)).some(
+			(match) => !belongsToLongerLabel(text, match.index, label, protectedLabels)
+		);
 	if (newValue && !mentionedInNarrative && !matchingOwnClause) {
 		text = `${text.trim()} ${label}: ${newValue}.`.trim();
 	}
@@ -99,6 +124,11 @@ const CUSTOM_IDENTIFIER_NAMES = [
 	'compatibility',
 	'capacity',
 ];
+
+const IDENTIFIER_NAME_PATTERN = new RegExp(
+	`(?<![\\p{L}\\p{N}_])(?:${CUSTOM_IDENTIFIER_NAMES.map(escapeRegex).join('|')})(?![\\p{L}\\p{N}_])`,
+	'iu'
+);
 
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
@@ -128,7 +158,7 @@ export function reconcileDescriptionMetadata(
 		const oldFields = current.custom_fields ?? {};
 		const newFields = updates.custom_fields ?? {};
 		for (const key of new Set([...Object.keys(oldFields), ...Object.keys(newFields)])) {
-			if (!CUSTOM_IDENTIFIER_NAMES.some((name) => key.toLowerCase().includes(name))) continue;
+			if (!IDENTIFIER_NAME_PATTERN.test(key)) continue;
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
 			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
