@@ -59,9 +59,13 @@ process and upstream PRs are separate from this private deployment decision.
    tests against real inventory.
 
 4. Open a PR from the update branch to super-sonicX/homebox-companion main.
-   Address CodeRabbit and other review findings, including any compatibility
-   regressions, and rerun affected tests. Explicitly justify false positives
-   rather than removing supported features. Merge only after validation.
+   Triage every CodeRabbit and other review finding using the
+   [upstream-compatible review policy](review-triage-upstream.md). Fix confirmed
+   fork regressions, required integration defects and high/critical risks.
+   Document evidence-based deferral of unrelated non-critical upstream defects
+   and provide technical rationales for false positives. Rerun affected tests,
+   complete CodeRabbit re-review as appropriate, and merge only after all
+   findings have a documented disposition and required fixes are complete.
 5. Build a versioned image from the merged fork source. Use a clean Git
    archive from main, not a copied upstream Docker image plus undocumented
    application overlays. A possible host build sequence is:
