@@ -47,7 +47,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
+			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}(?:([.;!?]?[ \\t]*[([])|([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$))))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -69,7 +69,15 @@ function changeIdentifier(
 	if (oldValue) {
 		parts.metadata = parts.metadata.replace(
 			clausePattern(oldValue),
-			(_matched, leading: string, punctuation: string) => {
+			(matched: string, leading: string, qualifier: string | undefined, punctuation: string) => {
+				if (qualifier) {
+					if (!identity && newValue && !represented) {
+						represented = true;
+						return leading + label + ': ' + newValue + qualifier;
+					}
+					const suffix = matched.slice(leading.length + label.length);
+					return leading + 'Previous ' + label[0].toLowerCase() + label.slice(1) + suffix;
+				}
 				if (!newValue || represented) return '';
 				represented = true;
 				const end = punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';

@@ -332,15 +332,20 @@ async def test_create_keeps_an_unpunctuated_manufacturer_at_the_description_limi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("desired", ["Acme", "NewCo"])
-async def test_authored_recall_warning_in_a_manufacturer_clause_is_never_removed(gateway, desired):
-    description = "Relay. Manufacturer: Acme (recalled; do not energize)."
+@pytest.mark.parametrize("name", ["Acme", "St. Jude", "Acme Inc."])
+@pytest.mark.parametrize("state", ["unchanged", "corrected", "cleared"])
+async def test_authored_recall_warning_in_a_manufacturer_clause_is_never_removed(gateway, name, state):
+    description = f"Relay. Manufacturer: {name} (recalled; do not energize)."
+    desired = {"unchanged": name, "corrected": "NewCo", "cleared": None}[state]
     item = {"name": "Relay", "description": description, "manufacturer": desired}
-    if desired != "Acme":
-        item["previous_identifiers"] = {"manufacturer": "Acme"}
+    expected = description
+    if state != "unchanged":
+        item["previous_identifiers"] = {"manufacturer": name}
+        expected = description.replace("Manufacturer:", "Previous manufacturer:")
+        if desired:
+            expected += " Manufacturer: NewCo."
     response = await submit(gateway, [item])
     assert response.status_code == 200
-    expected = description if desired == "Acme" else f"{description} Manufacturer: NewCo."
     assert gateway.create_item.call_args.args[0].description == expected
 
 

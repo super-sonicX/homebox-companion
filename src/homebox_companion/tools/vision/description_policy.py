@@ -156,28 +156,31 @@ def remove_superseded_generated_identifiers(
         alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
             rf"(?P<leading>{CLAUSE_START}){re.escape(label)}[ \t]*:[ \t]*(?P<value>{alternatives})"
-            rf"(?P<end>[.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
+            r"(?:(?P<qualifier>[.;!?]?[ \t]*[([])|[.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
             re.IGNORECASE | re.MULTILINE,
         )
 
         def replace_stale(
-            match: re.Match[str], *, previous: str = previous, desired: str = desired, field: str = key
+            match: re.Match[str],
+            *,
+            previous: str = previous,
+            desired: str = desired,
+            field: str = key,
+            label: str = label,
         ) -> str:
             """Remove just the matched value and delimiter, leaving later sentences untouched."""
             value = match["value"].strip()
-            # A parenthetical annotation belongs to the author. Retain it even if
-            # the structured field changes; aggregation can add the new value separately.
-            qualified = any(
-                identity and re.match(rf"{re.escape(identity)}[ \t]*[([]", value, re.IGNORECASE)
-                for identity in (desired, previous)
-            )
-            if value and (value.casefold() == desired.casefold() or qualified):
+            if value and value.casefold() == desired.casefold():
                 return match[0]
             if value and (not previous or value.casefold() != previous.casefold()):
                 raise ValueError(
                     f"Cannot safely separate the previous {field} from the description. "
                     "Correct the labelled text or supply the matching previous_identifiers value."
                 )
+            if match["qualifier"]:
+                # Keep authored annotations with the identity they describe, even after a correction.
+                leading = match["leading"]
+                return f"{leading}Previous {label.lower()}{match[0][len(leading) + len(label) :]}"
             same_line = match.string[match.end() :].partition("\n")[0].strip()
             return match["leading"] if "\n" in match["leading"] and same_line else ""
 

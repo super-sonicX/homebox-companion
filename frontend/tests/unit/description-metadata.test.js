@@ -389,3 +389,35 @@ test('spaces or tabs before a label colon do not retain the wrong rating or manu
 		assert.equal(cleared.description, 'Controller. Keep dry.');
 	}
 });
+
+test('a qualified name and its note stay together when the current manufacturer changes', () => {
+	for (const name of ['Acme', 'Acme Inc.', 'St. Jude']) {
+		for (const note of ['(UK).', '[recalled; do not energize].']) {
+			const item = current({
+				description: 'Relay. Manufacturer: ' + name + ' ' + note,
+				manufacturer: name,
+			});
+			const old = 'Relay. Previous manufacturer: ' + name + ' ' + note;
+			assert.equal(
+				reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+				old + ' Manufacturer: NewCo.'
+			);
+			assert.equal(reconcileDescriptionMetadata(item, { manufacturer: '' }).description, old);
+		}
+	}
+});
+
+test('a technical rating can be corrected or cleared without losing its annotation', () => {
+	const item = current({
+		description: 'Controller. Voltage: 12V (DC). Keep dry.',
+		custom_fields: { Voltage: '12V' },
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '24V' } }).description,
+		'Controller. Voltage: 24V (DC). Keep dry.'
+	);
+	assert.equal(
+		reconcileDescriptionMetadata(item, { custom_fields: {} }).description,
+		'Controller. Previous voltage: 12V (DC). Keep dry.'
+	);
+});
