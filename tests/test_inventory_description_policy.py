@@ -578,3 +578,10 @@ def test_aggregation_stops_reading_eligible_fields_when_the_description_is_full(
 
     with pytest.raises(ValueError, match="1000 characters"):
         aggregate_description("Controller.", custom_fields=ManyFields(unused=""))
+
+
+def test_an_adapter_target_introduced_by_for_does_not_supply_its_manufacturer():
+    text = "Adapter for Acme sockets."
+    assert aggregate_description(text, manufacturer="Acme") == f"{text} Manufacturer: Acme."
+    own_brand = "Acme adapter for Acme sockets."
+    assert aggregate_description(own_brand, manufacturer="Acme") == own_brand

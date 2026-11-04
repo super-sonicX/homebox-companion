@@ -649,3 +649,20 @@ test('comma-separated technical ratings replace or clear the actual field and an
 		'Controller.'
 	);
 });
+
+test('the maker in an adapter description changes independently of a target introduced by for', () => {
+	for (const [description, expected] of [
+		['Acme adapter for Acme sockets.', 'NewCo adapter for Acme sockets.'],
+		['Adapter for Acme sockets.', 'Adapter for Acme sockets. Manufacturer: NewCo.'],
+		[
+			'Adapter for NewCo sockets, manufactured by Acme.',
+			'Adapter for NewCo sockets, manufactured by NewCo.',
+		],
+	]) {
+		const item = current({ description, manufacturer: 'Acme' });
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			expected
+		);
+	}
+});

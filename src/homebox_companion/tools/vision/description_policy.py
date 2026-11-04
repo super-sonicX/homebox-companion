@@ -49,6 +49,7 @@ HISTORICAL_HEADING = re.compile(r"^(?:previous|original|former|compatible|altern
 COMPATIBILITY_REFERENCE = re.compile(
     r"\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b", re.I
 )
+FOR_TARGET = re.compile(r"\bfor\b(?! (?:example|instance)\b)", re.I)
 NARRATIVE_FIELD_CUES = {
     "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
     "Part/model number": re.compile(
@@ -113,7 +114,7 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
         before = HORIZONTAL_SPACING.sub(" ", narrative[: match.start()])
         cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
         sentence = _sentence_prefix(before)
-        if COMPATIBILITY_REFERENCE.search(sentence):
+        if COMPATIBILITY_REFERENCE.search(sentence) or (label == "Manufacturer" and FOR_TARGET.search(sentence)):
             _, comma, field_prefix = sentence.rpartition(",")
             if not (comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())):
                 continue

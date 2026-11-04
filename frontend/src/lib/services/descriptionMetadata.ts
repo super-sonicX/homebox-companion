@@ -168,6 +168,7 @@ const FINANCIAL_NAME_PATTERN =
 
 const COMPATIBILITY_REFERENCE =
 	/\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b/iu;
+const FOR_TARGET = /\bfor\b(?! (?:example|instance)\b)/iu;
 const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = [
 	{
 		field: 'manufacturer',
@@ -206,7 +207,10 @@ function narrativeIdentityMatches(
 	const before = text.slice(0, offset).replace(HORIZONTAL_SPACING, ' ');
 	const cue = IDENTITY_CUES.find(({ pattern }) => pattern.test(before));
 	const sentence = sentencePrefix(before);
-	if (COMPATIBILITY_REFERENCE.test(sentence)) {
+	if (
+		COMPATIBILITY_REFERENCE.test(sentence) ||
+		(field === 'manufacturer' && FOR_TARGET.test(sentence))
+	) {
 		const comma = sentence.lastIndexOf(',');
 		const fieldPrefix = sentence.slice(comma + 1).trim();
 		if (comma < 0 || cue?.pattern.exec(fieldPrefix)?.index !== 0) return false;
