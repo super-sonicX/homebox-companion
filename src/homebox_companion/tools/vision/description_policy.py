@@ -11,7 +11,7 @@ import re
 
 MAX_DESCRIPTION_LENGTH = 1000
 # Generated headings start a sentence or a line. A suffix in "Compatible Manufacturer:" is authored text.
-CLAUSE_START = r"(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)"
+CLAUSE_START = r"(?:^[ \t]*|(?<=[,.;!?])[ \t]+|\r?\n[ \t]*)"
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -34,6 +34,8 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 # The review editor uses these same cues when correcting prose.
 # Unicode Space_Separator (Zs) plus tab, deliberately excluding line separators.
 HORIZONTAL_SPACING = re.compile(r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+")
+HEADING_MARKS = re.compile(r":|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000])")
+HISTORICAL_HEADING = re.compile(r"^(?:previous|original|former|compatible|alternative|historical|replacement)\b", re.I)
 NARRATIVE_FIELD_CUES = {
     "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
     "Part/model number": re.compile(
@@ -45,15 +47,24 @@ NARRATIVE_FIELD_CUES = {
 
 def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     """Separate narrative identity cues from named fields and authored notes."""
+    if ":" not in text:
+        return text
     labels = [*NARRATIVE_FIELD_CUES, *(custom_fields or {})]
-    protected = {label.strip().casefold() for label in labels}
-    alternatives = "|".join([*(re.escape(label) for label in labels), r"[^:.;!?\r\n]+"])
-    headings = re.compile(rf"{CLAUSE_START}({alternatives})[ \t]*:", re.IGNORECASE)
-    for match in headings.finditer(text):
-        heading = match[1].strip().casefold()
-        cue = HORIZONTAL_SPACING.sub(" ", heading.rsplit(",", 1)[-1].strip())
-        if heading in protected or not any(pattern.fullmatch(cue) for pattern in NARRATIVE_FIELD_CUES.values()):
-            return text[: match.start()]
+    names = "|".join(re.escape(label.strip()) for label in labels if label.strip())
+    # Match known literal headings separately: the generic scan must never backtrack over whitespace.
+    known = re.search(rf"{CLAUSE_START}(?:{names})[ \t]*:", text, re.IGNORECASE)
+    if known:
+        text = text[: known.start()]
+    start = 0
+    for mark in HEADING_MARKS.finditer(text):
+        if mark[0] == ":":
+            heading = HORIZONTAL_SPACING.sub(" ", text[start : mark.start()].strip())
+            if heading and (
+                HISTORICAL_HEADING.match(heading)
+                or not any(pattern.search(heading) for pattern in NARRATIVE_FIELD_CUES.values())
+            ):
+                return text[:start]
+        start = mark.end()
     return text
 
 

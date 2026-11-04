@@ -24,26 +24,36 @@ function identifierPattern(...values: string[]): RegExp {
 }
 
 // Keep this delimiter in sync with description_policy.CLAUSE_START.
-const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
+const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[,.;!?])[ \t]+|\r?\n[ \t]*)`;
+
+const HEADING_MARKS = /:|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
+const HISTORICAL_HEADING =
+	/^(?:previous|original|former|compatible|alternative|historical|replacement)\b/iu;
 
 /** Keep user-written headings and the notes after them out of narrative replacement. */
 function narrativeBoundary(text: string, labels: readonly string[]): number {
-	const headings = [...labels.map(escapeRegex), String.raw`[^:.;!?\r\n]+`];
-	const pattern = new RegExp(`${CLAUSE_START}(${headings.join('|')})[ \\t]*:`, 'giu');
-	const protectedNames = new Set(labels.map((label) => label.trim().toLowerCase()));
-	for (const match of text.matchAll(pattern)) {
-		const heading = match[1].trim().toLowerCase();
-		const cue = heading
-			.slice(heading.lastIndexOf(',') + 1)
-			.trim()
-			.replace(HORIZONTAL_SPACING, ' ');
-		if (
-			protectedNames.has(heading) ||
-			!IDENTITY_CUES.some(({ pattern }) => pattern.exec(cue)?.index === 0)
-		)
-			return match.index;
+	if (!text.includes(':')) return text.length;
+	const names = labels
+		.map((label) => label.trim())
+		.filter(Boolean)
+		.map(escapeRegex)
+		.join('|');
+	const known = new RegExp(`${CLAUSE_START}(?:${names})[ \\t]*:`, 'iu').exec(text);
+	const end = known?.index ?? text.length;
+	let start = 0;
+	for (const mark of text.slice(0, end).matchAll(HEADING_MARKS)) {
+		if (mark[0] === ':') {
+			const heading = text.slice(start, mark.index).trim().replace(HORIZONTAL_SPACING, ' ');
+			if (
+				heading &&
+				(HISTORICAL_HEADING.test(heading) ||
+					!IDENTITY_CUES.some(({ pattern }) => pattern.test(heading)))
+			)
+				return start;
+		}
+		start = mark.index + mark[0].length;
 	}
-	return text.length;
+	return end;
 }
 
 type DescriptionParts = { narrative: string; metadata: string };

@@ -538,3 +538,16 @@ def test_unicode_horizontal_spaces_keep_serial_numbers_distinct_from_models(gap)
     assert aggregate_description(text, model_number="ABC-123", serial_number="ABC-123") == (
         f"{text} Part/model number: ABC-123."
     )
+
+
+def test_prose_cue_with_a_product_prefix_and_comma_separated_warning():
+    text = "Cordless drill model: ABC-123, Warning: model: Z9 is recalled."
+    assert aggregate_description(text, model_number="ABC-123") == text
+    assert aggregate_description(text, model_number="Z9") == f"{text} Part/model number: Z9."
+
+
+@pytest.mark.parametrize("tail", ["X", "X:", ":X"])
+def test_maximum_length_whitespace_runs_remain_unchanged(tail):
+    text = "X." + " " * (998 - len(tail)) + tail
+    assert len(text) == 1000
+    assert aggregate_description(text) == text

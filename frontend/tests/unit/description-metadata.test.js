@@ -526,3 +526,14 @@ test('nonbreaking and other horizontal spaces preserve field ownership and the a
 		);
 	}
 });
+
+test('a product-prefixed model cue is editable but a comma-delimited warning stays intact', () => {
+	const item = current({
+		description: 'Cordless drill model: ABC-123, Warning: model: ABC-123 is recalled.',
+		model_number: 'ABC-123',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { model_number: 'DEF-456' }).description,
+		'Cordless drill model: DEF-456, Warning: model: ABC-123 is recalled.'
+	);
+});
