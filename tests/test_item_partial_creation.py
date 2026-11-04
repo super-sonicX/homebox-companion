@@ -368,3 +368,22 @@ async def test_single_terminal_period_in_company_name_precedes_other_metadata(ga
     elif submitted:
         expected += " Manufacturer: NewCo Ltd."
     assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gap", [" ", "\t"])
+async def test_create_recognizes_spacing_before_a_label_colon(gateway, gap):
+    description = f"Controller. Manufacturer{gap}: Acme. Voltage{gap}: 24V. Keep dry."
+    item = {
+        "name": "Controller",
+        "description": description,
+        "manufacturer": "NewCo",
+        "previous_identifiers": {"manufacturer": "Acme"},
+        "custom_fields": {"Voltage": "24V"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert (
+        gateway.create_item.call_args.args[0].description
+        == f"Controller. Voltage{gap}: 24V. Keep dry. Manufacturer: NewCo."
+    )

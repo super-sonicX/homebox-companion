@@ -155,7 +155,7 @@ def remove_superseded_generated_identifiers(
         known = sorted({value for value in (previous, desired) if value}, key=len, reverse=True)
         alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
-            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}:[ \t]*(?P<value>{alternatives})"
+            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}[ \t]*:[ \t]*(?P<value>{alternatives})"
             rf"(?P<end>[.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
             re.IGNORECASE | re.MULTILINE,
         )

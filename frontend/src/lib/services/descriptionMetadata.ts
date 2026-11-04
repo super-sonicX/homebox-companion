@@ -27,7 +27,7 @@ const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
 /** Keep user-written headings and the notes after them out of narrative replacement. */
 function narrativeBoundary(text: string, labels: readonly string[]): number {
 	const headings = [...labels.map(escapeRegex), String.raw`[^:.;!?\r\n]+`];
-	const match = new RegExp(`${CLAUSE_START}(?:${headings.join('|')}):`, 'iu').exec(text);
+	const match = new RegExp(`${CLAUSE_START}(?:${headings.join('|')})[ \\t]*:`, 'iu').exec(text);
 	return match?.index ?? text.length;
 }
 
@@ -47,7 +47,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
+			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
 			'giu'
 		);
 	let represented = Boolean(

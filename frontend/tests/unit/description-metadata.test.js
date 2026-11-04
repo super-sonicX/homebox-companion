@@ -372,3 +372,20 @@ test('a manufacturer ending in a full stop can share the sentence delimiter with
 		'Relay. Manufacturer: Acme Inc.'
 	);
 });
+
+test('spaces or tabs before a label colon do not retain the wrong rating or manufacturer', () => {
+	for (const gap of [' ', '\t']) {
+		const item = current({
+			description: 'Controller. Voltage' + gap + ': 12V. Manufacturer' + gap + ': Acme. Keep dry.',
+			custom_fields: { Voltage: '12V' },
+			manufacturer: 'Acme',
+		});
+		const update = reconcileDescriptionMetadata(item, {
+			custom_fields: { Voltage: '24V' },
+			manufacturer: 'NewCo',
+		});
+		assert.equal(update.description, 'Controller. Voltage: 24V. Manufacturer: NewCo. Keep dry.');
+		const cleared = reconcileDescriptionMetadata(item, { custom_fields: {}, manufacturer: '' });
+		assert.equal(cleared.description, 'Controller. Keep dry.');
+	}
+});
