@@ -551,3 +551,8 @@ def test_maximum_length_whitespace_runs_remain_unchanged(tail):
     text = "X." + " " * (998 - len(tail)) + tail
     assert len(text) == 1000
     assert aggregate_description(text) == text
+
+
+def test_a_manufacturer_named_after_a_compatibility_clause_is_still_recognized():
+    text = "Compatible with Acme appliances, manufactured by NewCo."
+    assert aggregate_description(text, manufacturer="NewCo") == text

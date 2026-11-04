@@ -10,8 +10,10 @@ from __future__ import annotations
 import re
 
 MAX_DESCRIPTION_LENGTH = 1000
+# One Unicode space separator (Zs) or tab, excluding line breaks.
+HSPACE = r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
 # Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
-CLAUSE_START = r"(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)"
+CLAUSE_START = rf"(?:^{HSPACE}*|(?<=[.;!?]){HSPACE}+|\r?\n{HSPACE}*)"
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -33,9 +35,12 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 
 # The review editor uses these same cues when correcting prose.
 # Unicode Space_Separator (Zs) plus tab, deliberately excluding line separators.
-HORIZONTAL_SPACING = re.compile(r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+")
-HEADING_MARKS = re.compile(r":|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000])")
+HORIZONTAL_SPACING = re.compile(rf"{HSPACE}+")
+HEADING_MARKS = re.compile(rf":|[\r\n\u2028\u2029]|(?<=[,.;!?])(?={HSPACE})")
 HISTORICAL_HEADING = re.compile(r"^(?:previous|original|former|compatible|alternative|historical|replacement)\b", re.I)
+COMPATIBILITY_REFERENCE = re.compile(
+    r"\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b", re.I
+)
 NARRATIVE_FIELD_CUES = {
     "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
     "Part/model number": re.compile(
@@ -52,7 +57,7 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     labels = [*NARRATIVE_FIELD_CUES, *(custom_fields or {})]
     names = "|".join(re.escape(label.strip()) for label in labels if label.strip())
     # Match known literal headings separately: the generic scan must never backtrack over whitespace.
-    known = re.search(rf"{CLAUSE_START}(?:{names})[ \t]*:", text, re.IGNORECASE)
+    known = re.search(rf"{CLAUSE_START}(?:{names}){HSPACE}*:", text, re.IGNORECASE)
     if known:
         text = text[: known.start()]
     start = 0
@@ -75,6 +80,11 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
     for match in token.finditer(narrative):
         before = HORIZONTAL_SPACING.sub(" ", narrative[: match.start()])
         cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
+        sentence = re.split(r"[.;!?\r\n\u2028\u2029]", before)[-1]
+        if COMPATIBILITY_REFERENCE.search(sentence):
+            _, comma, field_prefix = sentence.rpartition(",")
+            if not (comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())):
+                continue
         if cue == label or (cue is None and distinctive):
             return True
     return False
@@ -149,8 +159,8 @@ def aggregate_description(
         if not value:
             continue
         own_clause = re.compile(
-            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}"
-            r"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$)))",
+            rf"{CLAUSE_START}{re.escape(label)}{HSPACE}*:{HSPACE}*{re.escape(value)}"
+            rf"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|{HSPACE}*(?:[([]|\r?\n|$)))",
             re.IGNORECASE,
         )
         if own_clause.search(result) or (not require_label and _narrative_has_identifier(narrative, value, label)):
@@ -201,8 +211,8 @@ def remove_superseded_generated_identifiers(
         known = sorted({value for value in (previous, desired) if value}, key=len, reverse=True)
         alternatives = "|".join([*(re.escape(value) for value in known), r"[^\r\n]*?"])
         clause = re.compile(
-            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}[ \t]*:[ \t]*(?P<value>{alternatives})"
-            r"(?:(?P<qualifier>[.;!?]?[ \t]*[([])|[,.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
+            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}{HSPACE}*:{HSPACE}*(?P<value>{alternatives})"
+            rf"(?:(?P<qualifier>[.;!?]?{HSPACE}*[([])|[,.;!?](?=\s|$)|(?<=[.;!?])(?=\s|$)|(?=\r?$))",
             re.IGNORECASE | re.MULTILINE,
         )
 

@@ -417,3 +417,28 @@ async def test_canonical_serial_followed_by_a_comma_saves_verbatim(gateway):
     response = await submit(gateway, [{"name": "Device", "description": prose, "serial_number": "SN-123"}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == prose
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gap", ["\u00a0", "\u202f", "\u3000"])
+@pytest.mark.parametrize("desired", ["Acme", "NewCo"])
+async def test_create_preserves_unicode_spacing_before_an_identity_note(gateway, gap, desired):
+    text = f"Relay. Manufacturer: Acme{gap}(recalled)."
+    item = {
+        "name": "Relay",
+        "description": text,
+        "manufacturer": desired,
+        "previous_identifiers": {"manufacturer": "Acme"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = text if desired == "Acme" else f"Relay. Previous manufacturer: Acme{gap}(recalled). Manufacturer: NewCo."
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_use_compatibility_as_the_current_manufacturer(gateway):
+    text = "Compatible with Acme appliances."
+    response = await submit(gateway, [{"name": "Adapter", "description": text, "manufacturer": "Acme"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"{text} Manufacturer: Acme."

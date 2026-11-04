@@ -9,6 +9,7 @@ const METADATA_LABELS = {
 
 type IdentityField = keyof typeof METADATA_LABELS;
 const IDENTITY_FIELDS = Object.keys(METADATA_LABELS) as IdentityField[];
+const HSPACE = /[\p{Zs}\t]/u.source;
 const HORIZONTAL_SPACING = /[\p{Zs}\t]+/gu;
 
 function escapeRegex(value: string): string {
@@ -24,7 +25,7 @@ function identifierPattern(...values: string[]): RegExp {
 }
 
 // Keep this delimiter in sync with description_policy.CLAUSE_START.
-const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
+const CLAUSE_START = String.raw`(?:^${HSPACE}*|(?<=[.;!?])${HSPACE}+|\r?\n${HSPACE}*)`;
 
 const HEADING_MARKS = /:|[\r\n\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
 const HISTORICAL_HEADING =
@@ -38,7 +39,7 @@ function narrativeBoundary(text: string, labels: readonly string[]): number {
 		.filter(Boolean)
 		.map(escapeRegex)
 		.join('|');
-	const known = new RegExp(`${CLAUSE_START}(?:${names})[ \\t]*:`, 'iu').exec(text);
+	const known = new RegExp(`${CLAUSE_START}(?:${names})${HSPACE}*:`, 'iu').exec(text);
 	const end = known?.index ?? text.length;
 	let start = 0;
 	for (const mark of text.slice(0, end).matchAll(HEADING_MARKS)) {
@@ -72,7 +73,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}[ \\t]*:[ \\t]*${escapeRegex(value)}(?:([.;!?]?[ \\t]*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$))))`,
+			`(${CLAUSE_START})${escapeRegex(label)}${HSPACE}*:${HSPACE}*${escapeRegex(value)}(?:([.;!?]?${HSPACE}*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=${HSPACE}*(?:\\r?\\n|$))))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -145,6 +146,8 @@ const IDENTIFIER_NAME_PATTERN = new RegExp(
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
 
+const COMPATIBILITY_REFERENCE =
+	/\b(?:(?:in)?compatible with|works with|for use with|replacement for|fits)\b/iu;
 const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = [
 	{
 		field: 'manufacturer',
@@ -170,6 +173,12 @@ function narrativeIdentityMatches(
 ): boolean {
 	const before = text.slice(0, offset).replace(HORIZONTAL_SPACING, ' ');
 	const cue = IDENTITY_CUES.find(({ pattern }) => pattern.test(before));
+	const sentence = before.split(/[.;!?\r\n\u2028\u2029]/u).at(-1) ?? '';
+	if (COMPATIBILITY_REFERENCE.test(sentence)) {
+		const comma = sentence.lastIndexOf(',');
+		const fieldPrefix = sentence.slice(comma + 1).trim();
+		if (comma < 0 || cue?.pattern.exec(fieldPrefix)?.index !== 0) return false;
+	}
 	if (cue) return cue.field === field;
 	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
 	if (

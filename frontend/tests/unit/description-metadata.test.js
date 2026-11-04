@@ -555,3 +555,40 @@ test('comma-separated prose can correct both model and serial and retain a warni
 		'Manufacturer: NewCo Inc., keep dry.'
 	);
 });
+
+test('an identity correction cannot change which appliances the item fits', () => {
+	for (const [prose, expected] of [
+		['Compatible with Acme appliances.', 'Compatible with Acme appliances. Manufacturer: NewCo.'],
+		[
+			'Acme adapter. Compatible with Acme appliances.',
+			'NewCo adapter. Compatible with Acme appliances.',
+		],
+		[
+			'Compatible with NewCo and Acme appliances.',
+			'Compatible with NewCo and Acme appliances. Manufacturer: NewCo.',
+		],
+		[
+			'Compatible with Acme appliances, manufactured by Acme.',
+			'Compatible with Acme appliances, manufactured by NewCo.',
+		],
+	]) {
+		const item = current({ description: prose, manufacturer: 'Acme' });
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			expected
+		);
+	}
+});
+
+test('Unicode spacing before a note remains intact after an identity correction', () => {
+	for (const gap of ['\u00a0', '\u202f', '\u3000']) {
+		const item = current({
+			description: 'Relay. Manufacturer: Acme' + gap + '(recalled).',
+			manufacturer: 'Acme',
+		});
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			'Relay. Previous manufacturer: Acme' + gap + '(recalled). Manufacturer: NewCo.'
+		);
+	}
+});
