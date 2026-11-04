@@ -421,3 +421,20 @@ test('a technical rating can be corrected or cleared without losing its annotati
 		'Controller. Previous voltage: 12V (DC). Keep dry.'
 	);
 });
+
+test('short model and serial codes change only after the corresponding identity cue', () => {
+	const item = current({
+		description: 'Sony mirrorless camera, model A7, serial A7, stored on shelf A7 near A9.',
+		model_number: 'A7',
+		serial_number: 'A7',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { model_number: 'A9', serial_number: 'B2' }).description,
+		'Sony mirrorless camera, model A9, serial B2, stored on shelf A7 near A9.'
+	);
+	const shelf = current({ description: 'Camera stored on shelf A9.', model_number: null });
+	assert.equal(
+		reconcileDescriptionMetadata(shelf, { model_number: 'A9' }).description,
+		'Camera stored on shelf A9. Part/model number: A9.'
+	);
+});

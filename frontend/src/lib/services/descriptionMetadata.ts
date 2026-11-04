@@ -53,16 +53,14 @@ function changeIdentifier(
 	let represented = Boolean(
 		newValue &&
 		((identity &&
-			Array.from(parts.narrative.matchAll(identifierPattern(newValue))).some(
-				(match) =>
-					!/^\d+$/.test(newValue) ||
-					numericIdentityContext(
-						parts.narrative,
-						match.index,
-						newValue,
-						identity.field,
-						identity.name
-					)
+			Array.from(parts.narrative.matchAll(identifierPattern(newValue))).some((match) =>
+				narrativeIdentityMatches(
+					parts.narrative,
+					match.index,
+					newValue,
+					identity.field,
+					identity.name
+				)
 			)) ||
 			clausePattern(newValue).test(parts.metadata))
 	);
@@ -121,20 +119,22 @@ const IDENTIFIER_NAME_PATTERN = new RegExp(
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
 
-/** A short number needs an explicit model/serial cue; a leading part designation can precede the product name. */
-function numericIdentityContext(
+/** Disambiguate short identities and numbers using their field cue or a leading product designation. */
+function narrativeIdentityMatches(
 	text: string,
 	offset: number,
 	value: string,
 	field: IdentityField,
 	name: string
 ): boolean {
+	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
 	const before = text.slice(0, offset);
+	if (field === 'manufacturer')
+		return /\b(?:manufacturer|brand|made by|manufactured by)\s*[#:=]?\s*$/iu.test(before);
 	const cue =
 		field === 'serial_number'
 			? /\b(?:serial(?:\s+(?:number|no\.?))?|s\/n)\s*[#:=]?\s*$/iu
 			: /\b(?:model(?:\s+(?:number|no\.?))?|part(?:\s+(?:number|no\.?))?|mpn|p\/n)\s*[#:=]?\s*$/iu;
-	if (field === 'manufacturer') return false;
 	if (cue.test(before)) return true;
 	if (
 		field !== 'model_number' ||
@@ -165,11 +165,7 @@ function reconcileNarrative(
 			original: (source[field] ?? '').trim(),
 			replacement: (next[field] ?? '').trim(),
 		}))
-		.filter(
-			({ field, original }) =>
-				/^\d+$/.test(original) ||
-				(/[\p{L}_/-]/u.test(original) && original.length >= (field === 'manufacturer' ? 2 : 3))
-		);
+		.filter(({ original }) => original.length > 0);
 	if (!identities.length) return narrative;
 	const pattern = identifierPattern(
 		...identities.map(({ original }) => original).sort((a, b) => b.length - a.length)
@@ -178,8 +174,7 @@ function reconcileNarrative(
 		const owners = identities.filter(
 			({ field, original }) =>
 				original.toLocaleLowerCase() === matched.toLocaleLowerCase() &&
-				(!/^\d+$/.test(original) ||
-					numericIdentityContext(narrative, offset, original, field, itemName))
+				narrativeIdentityMatches(narrative, offset, original, field, itemName)
 		);
 		const [first] = owners;
 		if (!first?.replacement || first.original === first.replacement) return matched;
