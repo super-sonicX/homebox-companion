@@ -119,6 +119,18 @@ const IDENTIFIER_NAME_PATTERN = new RegExp(
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
 
+const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = [
+	{
+		field: 'manufacturer',
+		pattern: /\b(?:manufacturer|brand(?: name)?|made by|manufactured by)\s*[#:=]?\s*$/iu,
+	},
+	{
+		field: 'model_number',
+		pattern: /\b(?:(?:model|part)(?:\s+(?:number|no\.?))?|mpn|p\/n)\s*[#:=]?\s*$/iu,
+	},
+	{ field: 'serial_number', pattern: /\b(?:serial(?:\s+(?:number|no\.?))?|s\/n)\s*[#:=]?\s*$/iu },
+];
+
 /** Disambiguate short identities and numbers using their field cue or a leading product designation. */
 function narrativeIdentityMatches(
 	text: string,
@@ -127,15 +139,10 @@ function narrativeIdentityMatches(
 	field: IdentityField,
 	name: string
 ): boolean {
-	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
 	const before = text.slice(0, offset);
-	if (field === 'manufacturer')
-		return /\b(?:manufacturer|brand|made by|manufactured by)\s*[#:=]?\s*$/iu.test(before);
-	const cue =
-		field === 'serial_number'
-			? /\b(?:serial(?:\s+(?:number|no\.?))?|s\/n)\s*[#:=]?\s*$/iu
-			: /\b(?:model(?:\s+(?:number|no\.?))?|part(?:\s+(?:number|no\.?))?|mpn|p\/n)\s*[#:=]?\s*$/iu;
-	if (cue.test(before)) return true;
+	const cue = IDENTITY_CUES.find(({ pattern }) => pattern.test(before));
+	if (cue) return cue.field === field;
+	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
 	if (
 		field !== 'model_number' ||
 		value.length < 3 ||

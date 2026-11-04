@@ -32,6 +32,26 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 )
 
 
+# The review editor uses these same cues when correcting prose.
+NARRATIVE_FIELD_CUES = {
+    "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)\s*[#:=]?\s*$", re.I),
+    "Part/model number": re.compile(r"\b(?:(?:model|part)(?:\s+(?:number|no\.?))?|mpn|p/n)\s*[#:=]?\s*$", re.I),
+    "Serial number": re.compile(r"\b(?:serial(?:\s+(?:number|no\.?))?|s/n)\s*[#:=]?\s*$", re.I),
+}
+
+
+def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
+    """Prefer the field named in the prose when an identifier could describe multiple fields."""
+    token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
+    distinctive = not value.isdecimal() and len(value) >= (2 if label == "Manufacturer" else 3)
+    for match in token.finditer(narrative):
+        before = narrative[: match.start()]
+        cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
+        if cue == label or (cue is None and distinctive):
+            return True
+    return False
+
+
 def aggregate_description(
     description: str | None,
     *,
@@ -106,8 +126,7 @@ def aggregate_description(
             r"(?:(?<=[.;!?])(?=\s|$)|(?=[.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$)))",
             re.IGNORECASE,
         )
-        token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
-        if own_clause.search(result) or (not require_label and not value.isdecimal() and token.search(narrative)):
+        if own_clause.search(result) or (not require_label and _narrative_has_identifier(narrative, value, label)):
             continue
         phrase = f"{label}: {value}" if value[-1] in ".;!?" else f"{label}: {value}."
         if result and result[-1] not in ".;!?":

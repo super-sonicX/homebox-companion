@@ -506,3 +506,13 @@ def test_unrelated_numeric_quantity_does_not_suppress_a_model_number():
 def test_unpunctuated_labelled_specification_ends_at_the_line_boundary(ending):
     description = f"Controller. Voltage: 12V{ending}"
     assert aggregate_description(description, custom_fields={"Voltage": "12V"}) == description
+
+
+@pytest.mark.parametrize("value", ["ABC-123", "A7", "24"])
+def test_a_serial_in_prose_cannot_hide_a_model_with_the_same_value(value):
+    serial_only = f"Device, serial {value}."
+    assert aggregate_description(serial_only, serial_number=value, model_number=value) == (
+        f"{serial_only} Part/model number: {value}."
+    )
+    both = f"Device, model {value}, serial {value}."
+    assert aggregate_description(both, serial_number=value, model_number=value) == both

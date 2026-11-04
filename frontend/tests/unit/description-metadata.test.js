@@ -438,3 +438,29 @@ test('short model and serial codes change only after the corresponding identity 
 		'Camera stored on shelf A9. Part/model number: A9.'
 	);
 });
+
+test('explicit field wording takes priority when manufacturer, model and serial share a long code', () => {
+	const item = current({
+		description: 'Device by brand ABC-123, model ABC-123, serial ABC-123. See ABC-123 for details.',
+		manufacturer: 'ABC-123',
+		model_number: 'ABC-123',
+		serial_number: 'ABC-123',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { model_number: 'DEF-456' }).description,
+		'Device by brand ABC-123, model DEF-456, serial ABC-123. See ABC-123 for details.'
+	);
+	assert.equal(
+		reconcileDescriptionMetadata(item, {
+			manufacturer: 'NewCo',
+			model_number: 'DEF-456',
+			serial_number: 'XYZ-789',
+		}).description,
+		'Device by brand NewCo, model DEF-456, serial XYZ-789. See ABC-123 for details.'
+	);
+	const other = current({ description: 'Device, serial ABC-123.', model_number: null });
+	assert.equal(
+		reconcileDescriptionMetadata(other, { model_number: 'ABC-123' }).description,
+		'Device, serial ABC-123. Part/model number: ABC-123.'
+	);
+});
