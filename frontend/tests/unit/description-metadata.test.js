@@ -271,3 +271,18 @@ test('returning every field to its starting value restores the original narrativ
 	}
 	assert.equal(item.description, original);
 });
+
+test('authored compatibility headings do not become the primary manufacturer', () => {
+	const item = current({
+		description: 'Adapter. Compatible Manufacturer: Acme.',
+		manufacturer: 'Acme',
+	});
+	const update = reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' });
+	assert.equal(update.description, 'Adapter. Compatible Manufacturer: Acme. Manufacturer: NewCo.');
+});
+
+test('an automatically appended identity has a standalone heading on later saves', () => {
+	let item = current({ description: 'Unpunctuated prose', model_number: null });
+	item = { ...item, ...reconcileDescriptionMetadata(item, { model_number: 'OLD-123' }) };
+	assert.equal(item.description, 'Unpunctuated prose. Part/model number: OLD-123.');
+});

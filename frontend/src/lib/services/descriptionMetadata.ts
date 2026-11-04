@@ -21,35 +21,14 @@ function identifierPattern(...values: string[]): RegExp {
 	);
 }
 
-/** The functional narrative precedes generated metadata clauses. Never edit
- * another field's clause, even if its value matches the edited field. */
-function narrativeBoundary(text: string, protectedLabels: readonly string[]): number {
-	let first = text.length;
-	for (const label of new Set(protectedLabels)) {
-		const heading = new RegExp(`(?:^|\\s+)${escapeRegex(label)}:\\s*`, 'iu');
-		const match = heading.exec(text);
-		if (match && match.index < first) first = match.index;
-	}
-	return first;
-}
+// Keep this delimiter in sync with description_policy.CLAUSE_START.
+const CLAUSE_START = String.raw`(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)`;
 
-/** Reject matches at the end of a longer protected heading: "Voltage" is
- * not the same field as "Activation Voltage". Match offsets include the
- * whitespace preceding the matched label. */
-function belongsToLongerLabel(
-	text: string,
-	offset: number,
-	label: string,
-	protectedLabels: readonly string[]
-): boolean {
-	const lowerLabel = label.toLocaleLowerCase();
-	const before = text.slice(0, offset).toLocaleLowerCase();
-	return protectedLabels.some((other) => {
-		const lowerOther = other.toLocaleLowerCase();
-		if (lowerOther === lowerLabel || !lowerOther.endsWith(` ${lowerLabel}`)) return false;
-		const prefix = lowerOther.slice(0, -lowerLabel.length - 1);
-		return before.endsWith(prefix);
-	});
+/** Keep user-written headings and the notes after them out of narrative replacement. */
+function narrativeBoundary(text: string, labels: readonly string[]): number {
+	const headings = [...labels.map(escapeRegex), String.raw`[^:.;!?\r\n]+`];
+	const match = new RegExp(`${CLAUSE_START}(?:${headings.join('|')}):`, 'iu').exec(text);
+	return match?.index ?? text.length;
 }
 
 type DescriptionParts = { narrative: string; metadata: string };
@@ -60,7 +39,6 @@ function changeIdentifier(
 	label: string,
 	previous: string | null | undefined,
 	next: string | null | undefined,
-	protectedLabels: readonly string[],
 	isIdentity: boolean
 ): void {
 	const oldValue = (previous ?? '').trim();
@@ -69,21 +47,18 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(^|\\s+)${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?])(?=\\s|$)`,
+			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?])(?=\\s|$)`,
 			'giu'
 		);
 	let represented = Boolean(
 		newValue &&
 		((isIdentity && identifierPattern(newValue).test(parts.narrative)) ||
-			Array.from(parts.metadata.matchAll(clausePattern(newValue))).some(
-				(match) => !belongsToLongerLabel(parts.metadata, match.index, label, protectedLabels)
-			))
+			clausePattern(newValue).test(parts.metadata))
 	);
 	if (oldValue) {
 		parts.metadata = parts.metadata.replace(
 			clausePattern(oldValue),
-			(matched, leading: string, punctuation: string, offset: number) => {
-				if (belongsToLongerLabel(parts.metadata, offset, label, protectedLabels)) return matched;
+			(_matched, leading: string, punctuation: string) => {
 				if (!newValue || represented) return '';
 				represented = true;
 				return `${leading}${label}: ${newValue}${punctuation}`;
@@ -92,7 +67,7 @@ function changeIdentifier(
 	}
 	if (newValue && !represented) {
 		const before = (parts.narrative + parts.metadata).trimEnd();
-		const separator = !before ? '' : !isIdentity && !/[.;!?]$/.test(before) ? '. ' : ' ';
+		const separator = !before ? '' : !/[.;!?]$/.test(before) ? '. ' : ' ';
 		parts.metadata = parts.metadata.trimEnd() + separator + `${label}: ${newValue}.`;
 	}
 }
@@ -191,7 +166,7 @@ export function reconcileDescriptionMetadata(
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
 		if (next[key] === source[key]) continue;
-		changeIdentifier(parts, label, source[key], next[key], protectedLabels, true);
+		changeIdentifier(parts, label, source[key], next[key], true);
 		changed = true;
 	}
 	if (source.custom_fields || next.custom_fields) {
@@ -202,7 +177,7 @@ export function reconcileDescriptionMetadata(
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
 			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
 			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
-			changeIdentifier(parts, key, oldFields[key], newFields[key], protectedLabels, false);
+			changeIdentifier(parts, key, oldFields[key], newFields[key], false);
 			changed = true;
 		}
 	}

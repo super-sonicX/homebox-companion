@@ -94,7 +94,7 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 		json({ items: [{ name: 'Original', quantity: 1, custom_fields: { Material: 'Wood' } }] })
 	);
 	const expectedDescription =
-		'Description — edited Manufacturer: Maker. Part/model number: Model. Serial number: Serial.';
+		'Description — edited. Manufacturer: Maker. Part/model number: Model. Serial number: Serial.';
 	const creations: unknown[] = [];
 	api.on('POST', '/api/items', (request) => {
 		creations.push(request.postDataJSON());

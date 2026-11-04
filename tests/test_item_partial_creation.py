@@ -272,3 +272,18 @@ async def test_single_character_identifier_correction_preserves_short_warnings(g
     )
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == f"Relay. Flammable. Keep away from heat. {label}: Y."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("label", ["Compatible Manufacturer", "Previous Part/model number", "Original Serial number"])
+async def test_create_preserves_longer_authored_headings(gateway, label):
+    field = {
+        "Compatible Manufacturer": "manufacturer",
+        "Previous Part/model number": "model_number",
+        "Original Serial number": "serial_number",
+    }[label]
+    own = {"manufacturer": "Manufacturer", "model_number": "Part/model number", "serial_number": "Serial number"}[field]
+    original = f"Adapter. {label}: Acme."
+    response = await submit(gateway, [{"name": "Adapter", "description": original, field: "NewCo"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"{original} {own}: NewCo."

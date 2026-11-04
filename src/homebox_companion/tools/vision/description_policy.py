@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 
 MAX_DESCRIPTION_LENGTH = 1000
+# Generated headings start a sentence or a line. A suffix in "Compatible Manufacturer:" is authored text.
+CLAUSE_START = r"(?:^[ \t]*|(?<=[.;!?])[ \t]+|\r?\n[ \t]*)"
+AUTHORED_HEADING = re.compile(CLAUSE_START + r"[^:.;!?\r\n]+:[ \t]*(?=\S|$)")
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -44,6 +47,8 @@ def aggregate_description(
     Never truncate or discard a part number: overflow is raised to the caller.
     """
     result = (description or "").strip()
+    heading = AUTHORED_HEADING.search(result)
+    narrative = result[: heading.start()] if heading else result
     # Custom technical specifications require field-specific deduplication.
     # A "12" that appears in Voltage must not suppress Current: 12.
     values = [
@@ -96,20 +101,15 @@ def aggregate_description(
         # "12V", or "ABC-123" in "ABC-1234" for an exact match.
         if not value:
             continue
-        if require_label:
-            # Only an existing *same-field* value may suppress a generated
-            # technical specification. The start/punctuation boundary avoids
-            # confusing "Voltage" with a longer "Activation Voltage" label.
-            token = re.compile(
-                rf"(?:^|[.;!?]\s+|\n+){re.escape(label)}\s*:\s*{re.escape(value)}(?=[.;!?](?:\s|$)|$)",
-                re.IGNORECASE,
-            )
-        else:
-            token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
-        if token.search(result):
+        own_clause = re.compile(
+            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}(?=[.;!?](?:\s|$)|$)",
+            re.IGNORECASE,
+        )
+        token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
+        if own_clause.search(result) or (not require_label and token.search(narrative)):
             continue
         phrase = f"{label}: {value}."
-        if require_label and result and result[-1] not in ".;!?":
+        if result and result[-1] not in ".;!?":
             result += "."
         result = f"{result} {phrase}".strip()
 
@@ -186,12 +186,13 @@ def remove_superseded_generated_identifiers(
         # This avoids splitting manufacturer values such as "Acme Inc. Ltd".
         next_label = r"(?:Manufacturer|Part/model number|Serial number):"
         clause = re.compile(
-            rf"(?<!\S){re.escape(label)}:[ \t]*(?P<value>[^\r\n]+?)\.(?=\s+{next_label}|(?:\r?\n){{2,}}|\s*$)",
+            rf"(?P<leading>{CLAUSE_START}){re.escape(label)}:[ \t]*(?P<value>[^\r\n]+?)\."
+            rf"(?=\s+{next_label}|\r?\n|[ \t]*$)",
             re.IGNORECASE,
         )
         # A blank metadata label is not a value; do not read the next paragraph
         # as its content if the user clears the structured field.
-        text = re.sub(rf"(?m)(?<!\S){re.escape(label)}:[ \t]*(?=\r?$)", "", text)
+        text = re.sub(rf"(?m){CLAUSE_START}{re.escape(label)}:[ \t]*(?=\r?$)", "", text)
         desired = (expected or "").strip().casefold()
 
         def replace_stale(
@@ -210,7 +211,7 @@ def remove_superseded_generated_identifiers(
                 return match.group(0)
             # The appended metadata is superseded, but a later user sentence
             # must survive even when it was written on the same line.
-            return f"{following_prose}." if following_prose else ""
+            return f"{match.group('leading')}{following_prose}." if following_prose else ""
 
         text = clause.sub(replace_stale, text)
-    return re.sub(r"[ \t]{2,}", " ", text).strip()
+    return text.strip()
