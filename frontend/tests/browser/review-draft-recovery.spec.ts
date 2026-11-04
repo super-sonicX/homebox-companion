@@ -55,6 +55,7 @@ test('model edits survive keystrokes, photo replacement and draft recovery', asy
 	await page.locator('input[type="file"]').first().setInputFiles(photo);
 	await saved(page);
 	await resume(page);
+	await page.getByRole('button', { name: 'Extended Fields', exact: true }).click();
 	await model.pressSequentially('NEW-456');
 	await expect(description).toHaveValue('Bracket, model NEW-456.');
 	await description.fill('Manual note for NEW-456.');
