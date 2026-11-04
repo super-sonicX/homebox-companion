@@ -7,6 +7,24 @@ const METADATA_LABELS = {
 	serial_number: 'Serial number',
 } as const;
 
+type IdentityField = keyof typeof METADATA_LABELS;
+
+export interface IdentityEdit {
+	reviewId: string;
+	field: IdentityField;
+	previousValue: ReviewItem[IdentityField];
+	description: ReviewItem['description'];
+}
+
+/** Only single-field input events continue a typing session. Bulk updates use their own description. */
+export function editedIdentityField(updates: Partial<ReviewItem>): IdentityField | undefined {
+	const keys = Object.keys(updates);
+	const key = keys[0];
+	return keys.length === 1 && Object.hasOwn(METADATA_LABELS, key)
+		? (key as IdentityField)
+		: undefined;
+}
+
 function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -14,7 +32,7 @@ function escapeRegex(value: string): string {
 /** Match a complete identifier: GE must not match "voltage" or "ABC-123" match "ABC-123.4". */
 function identifierPattern(value: string): RegExp {
 	return new RegExp(
-		`(?<![\\p{L}\\p{N}_.-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|[\\./][\\p{L}\\p{N}_])`,
+		`(?<![\\p{L}\\p{N}_./-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|[\\./][\\p{L}\\p{N}_])`,
 		'giu'
 	);
 }
@@ -50,6 +68,7 @@ function belongsToLongerLabel(
 	});
 }
 
+/** Update one labelled clause while protecting other fields and any unrelated narrative. */
 function changeIdentifier(
 	text: string,
 	label: string,
@@ -61,6 +80,7 @@ function changeIdentifier(
 	const newValue = (next ?? '').trim();
 	if (oldValue === newValue) return text;
 
+	const isIdentity = Object.values(METADATA_LABELS).some((name) => name === label);
 	if (oldValue) {
 		// Remove only the canonical clause belonging to the edited field.
 		const generated = new RegExp(
@@ -77,7 +97,6 @@ function changeIdentifier(
 		// Technical readings such as Capacity=1 must never change unrelated
 		// prose (e.g. "1 port"). Only distinct identity values may be updated
 		// outside their own labelled clauses; numeric-only values are ambiguous.
-		const isIdentity = ['Manufacturer', 'Part/model number', 'Serial number'].includes(label);
 		const distinctive =
 			/[\p{L}_/-]/u.test(oldValue) && oldValue.length >= (label === 'Manufacturer' ? 2 : 3);
 		if (isIdentity && distinctive && newValue) {
@@ -90,7 +109,7 @@ function changeIdentifier(
 
 	const boundary = narrativeBoundary(text, protectedLabels);
 	const mentionedInNarrative =
-		newValue && identifierPattern(newValue).test(text.slice(0, boundary));
+		isIdentity && newValue && identifierPattern(newValue).test(text.slice(0, boundary));
 	const matchingOwnClausePattern =
 		newValue &&
 		new RegExp(`(?:^|\\s+)${escapeRegex(label)}:\\s*${escapeRegex(newValue)}\\.(?=\\s|$)`, 'giu');
@@ -100,6 +119,7 @@ function changeIdentifier(
 			(match) => !belongsToLongerLabel(text, match.index, label, protectedLabels)
 		);
 	if (newValue && !mentionedInNarrative && !matchingOwnClause) {
+		if (!isIdentity && text && !/[.;!?]$/.test(text.trim())) text = text.trimEnd() + '.';
 		text = `${text.trim()} ${label}: ${newValue}.`.trim();
 	}
 	return text.replace(/[ \t]{2,}/g, ' ').trim();

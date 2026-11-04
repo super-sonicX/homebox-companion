@@ -993,6 +993,7 @@ class ScanWorkflow {
 				detectedItems: this.reviewService.detectedItems,
 				confirmedItems: this.reviewService.confirmedItems,
 				activeReviewDraft: this.reviewService.activeDraft ?? undefined,
+				activeIdentityEdit: this.reviewService.activeIdentityEdit,
 				currentReviewIndex: this.reviewService.currentReviewIndex,
 				imageStatuses: this.analysisService.imageStatuses,
 				submission: this.submissionService.snapshot(),
@@ -1048,7 +1049,7 @@ class ScanWorkflow {
 			if (session.currentReviewIndex > 0) {
 				this.reviewService.setCurrentReviewIndex(session.currentReviewIndex);
 			}
-			this.reviewService.restoreDraft(session.activeReviewDraft);
+			this.reviewService.restoreDraft(session.activeReviewDraft, session.activeIdentityEdit);
 			this._saveState = 'saved';
 
 			// Restore image statuses (for partial_analysis recovery)

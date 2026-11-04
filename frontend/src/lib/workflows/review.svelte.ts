@@ -11,7 +11,11 @@ import { createUuidV4 } from '$lib/utils/uuid';
 
 import type { ReviewItem, ConfirmedItem } from '$lib/types';
 import { copyReviewItem } from '$lib/services/reviewEditor.svelte';
-import { reconcileDescriptionMetadata } from '$lib/services/descriptionMetadata';
+import {
+	editedIdentityField,
+	reconcileDescriptionMetadata,
+	type IdentityEdit,
+} from '$lib/services/descriptionMetadata';
 
 // =============================================================================
 // REVIEW SERVICE CLASS
@@ -32,6 +36,15 @@ export class ReviewService {
 	private _confirmedItems = $state<ConfirmedItem[]>([]);
 	private _activeDraft = $state<ReviewItem | null>(null);
 
+	private identityEdit?: IdentityEdit;
+
+	/** Persist an in-progress edit only alongside its owning item. */
+	get activeIdentityEdit(): IdentityEdit | undefined {
+		return this.activeDraft && this.identityEdit?.reviewId === this.activeDraft.reviewId
+			? this.identityEdit
+			: undefined;
+	}
+
 	get activeDraft(): ReviewItem | null {
 		return this._activeDraft?.reviewId === this.currentItem?.reviewId ? this._activeDraft : null;
 	}
@@ -40,23 +53,51 @@ export class ReviewService {
 		if (this.currentItem && !this.activeDraft) this._activeDraft = copyReviewItem(this.currentItem);
 	}
 
+	/** Apply explicit description edits immediately and reconcile typed identities from their original text. */
 	updateDraft(updates: Partial<ReviewItem>, identity: string | undefined): boolean {
 		if (!identity || this.activeDraft?.reviewId !== identity) return false;
-		const synchronized = reconcileDescriptionMetadata(this.activeDraft, updates);
+		const draft = this.activeDraft;
+		const field = editedIdentityField(updates);
+		let synchronized: Partial<ReviewItem>;
+		if (field) {
+			// Reconcile each keystroke against the start of this edit, including after a reload.
+			const anchor =
+				this.activeIdentityEdit?.field === field
+					? this.activeIdentityEdit
+					: {
+							reviewId: identity,
+							field,
+							previousValue: draft[field],
+							description: draft.description,
+						};
+			this.identityEdit = anchor;
+			const source = { ...draft, [field]: anchor.previousValue, description: anchor.description };
+			synchronized = {
+				description: anchor.description,
+				...reconcileDescriptionMetadata(source, updates),
+			};
+		} else {
+			synchronized = reconcileDescriptionMetadata(draft, updates);
+			if ('description' in synchronized) this.identityEdit = undefined;
+		}
 		this._activeDraft = copyReviewItem({
-			...this.activeDraft,
+			...draft,
 			...synchronized,
 			reviewId: identity,
 		});
 		return true;
 	}
 
-	restoreDraft(draft: ReviewItem | undefined): void {
+	/** Restore the unconfirmed draft and the starting value of its last identity edit. */
+	restoreDraft(draft: ReviewItem | undefined, edit?: IdentityEdit): void {
 		this._activeDraft =
 			draft?.reviewId && draft.reviewId === this.currentItem?.reviewId ? draft : null;
+		this.identityEdit =
+			this._activeDraft && edit?.reviewId === this._activeDraft.reviewId ? edit : undefined;
 	}
 
 	discardDraft(): void {
+		this.identityEdit = undefined;
 		this._activeDraft = null;
 	}
 
@@ -85,7 +126,7 @@ export class ReviewService {
 
 	/** Set detected items from analysis results */
 	setDetectedItems(items: ReviewItem[]): void {
-		this._activeDraft = null;
+		this.discardDraft();
 		this._detectedItems = items.map((item) => ({
 			...item,
 			reviewId: item.reviewId ?? createUuidV4(),

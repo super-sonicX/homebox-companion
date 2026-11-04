@@ -44,10 +44,12 @@ def aggregate_description(
     Never truncate or discard a part number: overflow is raised to the caller.
     """
     result = (description or "").strip()
+    # Custom technical specifications require field-specific deduplication.
+    # A "12" that appears in Voltage must not suppress Current: 12.
     values = [
-        ("Manufacturer", manufacturer),
-        ("Part/model number", model_number),
-        ("Serial number", serial_number),
+        ("Manufacturer", manufacturer, False),
+        ("Part/model number", model_number, False),
+        ("Serial number", serial_number, False),
     ]
     relevant_custom_identifiers = (
         "part number",
@@ -85,20 +87,31 @@ def aggregate_description(
             and not financial_name.search(name)
             and not str(value).strip().startswith(("£", "$", "€"))
         ):
-            values.append((key, value))
+            values.append((key, value, True))
 
-    for label, value in values:
+    for label, value, require_label in values:
         value = (value or "").strip()
         # A value is already present only if the complete identifier appears.
         # Plain substring checks can mistake "GE" in "voltage", "2" in
         # "12V", or "ABC-123" in "ABC-1234" for an exact match.
         if not value:
             continue
-        token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
+        if require_label:
+            # Only an existing *same-field* value may suppress a generated
+            # technical specification. The start/punctuation boundary avoids
+            # confusing "Voltage" with a longer "Activation Voltage" label.
+            token = re.compile(
+                rf"(?:^|[.;!?]\s+|\n+){re.escape(label)}\s*:\s*{re.escape(value)}(?=\.(?:\s|$)|$)",
+                re.IGNORECASE,
+            )
+        else:
+            token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
         if token.search(result):
             continue
         phrase = f"{label}: {value}."
-        result = f"{result.rstrip()} {phrase}".strip() if result else phrase
+        if require_label and result and result[-1] not in ".;!?":
+            result += "."
+        result = f"{result} {phrase}".strip()
 
     if len(result) > MAX_DESCRIPTION_LENGTH:
         raise ValueError(
@@ -135,7 +148,7 @@ def _split_identifier_and_following_prose(value: str) -> tuple[str, str]:
             if len(next_word) == 1 or ". " in before:
                 continue
         # A single initial followed by a single surname is also a valid name.
-        if re.fullmatch(r"[A-Z]\. [A-Z][a-z]+", value):
+        if re.fullmatch(r"[A-Z]", before) and re.match(r"^[A-Z][a-z]+(?:\.|$)", after):
             continue
         return before, after
     return value.strip(), ""
@@ -180,6 +193,7 @@ def remove_superseded_generated_identifiers(
         desired = (expected or "").strip().casefold()
 
         def replace_stale(match: re.Match[str], *, desired: str = desired) -> str:
+            """Keep an unchanged value verbatim and retain any user prose after a superseded value."""
             captured_value = match.group("value").strip()
             if desired and (
                 captured_value.casefold() == desired or captured_value.casefold().startswith(f"{desired}. ")

@@ -210,3 +210,9 @@ test('custom metadata names must match complete field-name terms', () => {
 	assert.match(updates.description, /Current Rating: 12A\./);
 	assert.doesNotMatch(updates.description, /Storage Preferences|Concurrent Users/);
 });
+
+test('an unrelated number in prose cannot suppress a labelled custom field', () => {
+	const previous = current({ description: 'Converter with 2 ports', custom_fields: {} });
+	const updates = reconcileDescriptionMetadata(previous, { custom_fields: { Capacity: '2' } });
+	assert.equal(updates.description, 'Converter with 2 ports. Capacity: 2.');
+});

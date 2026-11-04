@@ -179,6 +179,7 @@ async def test_create_does_not_duplicate_identifiers_already_in_description(gate
 
 @pytest.mark.asyncio
 async def test_create_removes_old_generated_identifiers_from_edited_fields(gateway):
+    """Check the exact identity passed to Homebox after a user corrects the detection."""
     response = await submit(
         gateway,
         [
@@ -215,6 +216,7 @@ async def test_create_removes_old_generated_model_when_explicitly_cleared(gatewa
 
 @pytest.mark.asyncio
 async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway):
+    """Exercise the create endpoint so partial manufacturer names cannot reach Homebox."""
     response = await submit(
         gateway,
         [
@@ -233,9 +235,10 @@ async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("manufacturer", ["Acme", "A. O. Smith", "St. Jude", "Dr. Martens"])
+@pytest.mark.parametrize("manufacturer", ["Acme", "A. Smith", "A. O. Smith", "St. Jude", "Dr. Martens"])
 @pytest.mark.parametrize("submitted", ["unchanged", "corrected", "cleared"])
 async def test_create_never_drops_user_safety_notes_after_generated_metadata(gateway, manufacturer, submitted):
+    """Verify the entire saved text, including the user note and the absence of any orphaned surname."""
     submitted_manufacturer = manufacturer if submitted == "unchanged" else "NewCo" if submitted == "corrected" else None
     response = await submit(
         gateway,
@@ -251,9 +254,8 @@ async def test_create_never_drops_user_safety_notes_after_generated_metadata(gat
     created = gateway.create_item.call_args.args[0]
     assert "Keep disconnected until installed." in created.description
     if submitted == "corrected":
-        assert "Manufacturer: NewCo." in created.description
-        assert f"Manufacturer: {manufacturer}." not in created.description
+        assert created.description == "Relay. Keep disconnected until installed. Manufacturer: NewCo."
     elif submitted == "cleared":
-        assert f"Manufacturer: {manufacturer}." not in created.description
+        assert created.description == "Relay. Keep disconnected until installed."
     else:
-        assert f"Manufacturer: {manufacturer}." in created.description
+        assert created.description == f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed."

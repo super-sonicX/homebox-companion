@@ -125,6 +125,7 @@ def test_vision_response_returns_422_instead_of_500_for_overflow():
 
 
 def test_save_reconciles_superseded_canonical_metadata_without_erasing_prose():
+    """Rebuild the search summary from the corrected structured fields while retaining the item narrative."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     raw = "Bumper mounting brackets. Manufacturer: WrongCo. Part/model number: OLD-123."
@@ -232,6 +233,7 @@ def test_generated_manufacturer_with_internal_periods_is_preserved_when_unchange
 
 
 def test_generated_manufacturer_with_internal_periods_is_fully_replaced_or_cleared():
+    """A dotted legal suffix must leave the description together with its old manufacturer."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     original = "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1."
@@ -304,6 +306,7 @@ def test_ai_validation_defers_overflow_to_guarded_response_boundary():
 
 
 def test_superseded_identifiers_preserve_following_user_sentences():
+    """A same-line safety note survives both correction and removal of the preceding field."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     raw = "Relay. Manufacturer: Acme. Keep disconnected until installed."
@@ -350,6 +353,7 @@ def test_only_whole_word_technical_field_names_are_aggregated():
 
 
 def test_initialled_dotted_manufacturer_names_are_not_split_into_prose():
+    """Initials are part of the manufacturer when retaining, correcting, or removing its generated clause."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     raw = "Relay. Manufacturer: A. O. Smith."
@@ -367,6 +371,7 @@ def test_initialled_dotted_manufacturer_names_are_not_split_into_prose():
 
 
 def test_dotted_manufacturer_names_followed_by_safety_prose_remain_intact():
+    """An unchanged name and the following user sentence must both survive a save."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     raw = "Relay. Manufacturer: A. O. Smith. Keep disconnected until installed."
@@ -401,6 +406,7 @@ def test_one_initial_plus_surname_is_preserved_or_removed_whole():
 
 @pytest.mark.parametrize("name", ["W. L. Gore", "St. Jude", "Dr. Martens", "A. O. Smith"])
 def test_dotted_brands_are_preserved_when_unchanged_with_or_without_following_prose(name):
+    """Saving matching structured metadata must preserve the original description verbatim."""
     from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
 
     for extra in ("", " Keep disconnected until installed."):
@@ -423,3 +429,30 @@ def test_correcting_dotted_brands_preserves_user_prose(name):
     )
     assert "Keep disconnected until installed." in cleaned
     assert name not in cleaned
+
+
+def test_technical_fields_with_identical_numeric_values_are_all_in_description():
+    result = aggregate_description("Controller.", custom_fields={"Voltage": "12", "Current": "12"})
+    assert "Voltage: 12." in result
+    assert "Current: 12." in result
+
+
+def test_unrelated_quantity_does_not_suppress_a_custom_capacity():
+    result = aggregate_description("Converter with 2 ports.", custom_fields={"Capacity": "2"})
+    assert "Capacity: 2." in result
+
+
+def test_shorter_field_label_does_not_match_longer_custom_field():
+    result = aggregate_description("Controller. Activation Voltage: 5V.", custom_fields={"Voltage": "5V"})
+    assert result == "Controller. Activation Voltage: 5V. Voltage: 5V."
+
+
+def test_technical_custom_field_does_not_duplicate_its_exact_labelled_value():
+    description = "Controller. Current: 12A."
+    assert aggregate_description(description, custom_fields={"Current": "12A"}) == description
+
+
+def test_custom_specifications_are_idempotent_after_unpunctuated_narrative():
+    fields = {"Current": "12"}
+    description = aggregate_description("Controller", custom_fields=fields)
+    assert aggregate_description(description, custom_fields=fields) == description

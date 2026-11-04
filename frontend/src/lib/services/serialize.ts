@@ -9,6 +9,7 @@
  * - Object URLs (blob:...) are session-scoped and become invalid after page reload
  * - Base64 data URLs preserve image bytes across reloads
  */
+import type { IdentityEdit } from './descriptionMetadata';
 import { createUuidV4 } from '$lib/utils/uuid';
 
 import type {
@@ -99,6 +100,7 @@ export interface StoredSession {
 	currentReviewIndex: number;
 	/** Unconfirmed edits, separate from canonical detections and confirmed rows. */
 	activeReviewDraft?: StoredReviewItem;
+	activeIdentityEdit?: IdentityEdit;
 
 	// Analysis state (for partial_analysis recovery)
 	imageStatuses?: Record<number, ImageAnalysisStatus>;

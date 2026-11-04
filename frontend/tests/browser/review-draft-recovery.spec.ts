@@ -18,6 +18,42 @@ async function resume(page: Page) {
 	await expect(page).toHaveURL(/\/review$/);
 }
 
+test('model edits reconcile the complete identifier across keystrokes and draft recovery', async ({
+	page,
+	api,
+}) => {
+	api.allowPageError(/navigation aborted/);
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Bracket',
+					quantity: 1,
+					description: 'Bracket, model OLD-123.',
+					model_number: 'OLD-123',
+				},
+			],
+		})
+	);
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	const model = page.getByLabel('Model Number', { exact: true });
+	const description = page.getByLabel('Description', { exact: true });
+	await model.press('End');
+	for (let i = 0; i < 5; i++) await model.press('Backspace');
+	await expect(model).toHaveValue('OL');
+	await saved(page);
+	await resume(page);
+	await expect(model).toHaveValue('OL');
+	await model.fill('');
+	await model.pressSequentially('NEW-456');
+	await expect(description).toHaveValue('Bracket, model NEW-456.');
+	await description.fill('Manual note for NEW-456.');
+	await model.fill('ABC-1');
+	await expect(description).toHaveValue('Manual note for ABC-1.');
+});
+
 test('unconfirmed rich edits and ordered replacement photos recover, including summary editing', async ({
 	page,
 	api,
@@ -27,6 +63,8 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	api.on('POST', '/api/tools/vision/detect', () =>
 		json({ items: [{ name: 'Original', quantity: 1, custom_fields: { Material: 'Wood' } }] })
 	);
+	const expectedDescription =
+		'Description — edited Manufacturer: Maker. Part/model number: Model. Serial number: Serial.';
 	const creations: unknown[] = [];
 	api.on('POST', '/api/items', (request) => {
 		creations.push(request.postDataJSON());
@@ -81,7 +119,7 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	await resume(page);
 	await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Recovered 名称');
 	await expect(page.getByLabel('Quantity', { exact: true })).toHaveValue('7');
-	await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Description — edited');
+	await expect(page.getByLabel('Description', { exact: true })).toHaveValue(expectedDescription);
 	await expect(page.getByLabel('Asset ID', { exact: true })).toHaveValue('123-456');
 	expect((await readDrafts(page, 'deployment:user:g1'))[0].activeReviewDraft).toMatchObject({
 		customThumbnail: expect.stringMatching(/^data:image/),
@@ -114,7 +152,7 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 				expect.objectContaining({
 					name: 'Summary recovered',
 					quantity: 7,
-					description: 'Description — edited',
+					description: expectedDescription,
 					manufacturer: 'Maker',
 					model_number: 'Model',
 					serial_number: 'Serial',
