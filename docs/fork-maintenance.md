@@ -63,9 +63,11 @@ process and upstream PRs are separate from this private deployment decision.
    [upstream-compatible review policy](review-triage-upstream.md). Fix confirmed
    fork regressions, required integration defects and high/critical risks.
    Document evidence-based deferral of unrelated, pre-existing upstream defects assessed as not high/critical
-   and provide technical rationales for false positives. Rerun affected tests,
-   complete CodeRabbit re-review as appropriate, and merge only after all
-   findings have a documented disposition and required fixes are complete.
+   and provide technical rationales for false positives. Rerun affected tests
+   after fixes, request CodeRabbit re-review after every new PR commit, and
+   merge only when the **final PR head** has a completed review, all findings
+   have provenance- and impact-supported dispositions, and all blocking fixes
+   are complete.
 5. Build a versioned image from the merged fork source. Use a clean Git
    archive from main, not a copied upstream Docker image plus undocumented
    application overlays. A possible host build sequence is:
