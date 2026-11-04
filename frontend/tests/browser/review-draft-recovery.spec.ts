@@ -18,7 +18,7 @@ async function resume(page: Page) {
 	await expect(page).toHaveURL(/\/review$/);
 }
 
-test('model edits reconcile the complete identifier across keystrokes and draft recovery', async ({
+test('model edits survive keystrokes, photo replacement and draft recovery', async ({
 	page,
 	api,
 }) => {
@@ -47,6 +47,14 @@ test('model edits reconcile the complete identifier across keystrokes and draft 
 	await resume(page);
 	await expect(model).toHaveValue('OL');
 	await model.fill('');
+	await page.getByRole('button', { name: /Attached Photos/ }).click();
+	await page.getByRole('button', { name: 'Remove image', exact: true }).click();
+	const photo = fileURLToPath(
+		new URL('../../../tests/assets/multi_item_single_image.jpg', import.meta.url)
+	);
+	await page.locator('input[type="file"]').first().setInputFiles(photo);
+	await saved(page);
+	await resume(page);
 	await model.pressSequentially('NEW-456');
 	await expect(description).toHaveValue('Bracket, model NEW-456.');
 	await description.fill('Manual note for NEW-456.');

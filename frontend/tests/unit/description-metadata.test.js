@@ -464,3 +464,14 @@ test('explicit field wording takes priority when manufacturer, model and serial 
 		'Device, serial ABC-123. Part/model number: ABC-123.'
 	);
 });
+
+test('field wording on a previous line cannot claim a shared brand and model', () => {
+	for (const newline of ['\n', '\r\n']) {
+		const original = 'Spare part' + newline + 'ACME relay.';
+		const item = current({ description: original, manufacturer: 'ACME', model_number: 'ACME' });
+		assert.equal(
+			reconcileDescriptionMetadata(item, { model_number: 'OTHER' }).description,
+			original + ' Part/model number: OTHER.'
+		);
+	}
+});

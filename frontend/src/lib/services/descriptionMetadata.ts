@@ -122,13 +122,16 @@ const FINANCIAL_NAME_PATTERN =
 const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = [
 	{
 		field: 'manufacturer',
-		pattern: /\b(?:manufacturer|brand(?: name)?|made by|manufactured by)\s*[#:=]?\s*$/iu,
+		pattern: /\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*$/iu,
 	},
 	{
 		field: 'model_number',
-		pattern: /\b(?:(?:model|part)(?:\s+(?:number|no\.?))?|mpn|p\/n)\s*[#:=]?\s*$/iu,
+		pattern: /\b(?:(?:model|part)(?:[ \t]+(?:number|no\.?))?|mpn|p\/n)[ \t]*[#:=]?[ \t]*$/iu,
 	},
-	{ field: 'serial_number', pattern: /\b(?:serial(?:\s+(?:number|no\.?))?|s\/n)\s*[#:=]?\s*$/iu },
+	{
+		field: 'serial_number',
+		pattern: /\b(?:serial(?:[ \t]+(?:number|no\.?))?|s\/n)[ \t]*[#:=]?[ \t]*$/iu,
+	},
 ];
 
 /** Disambiguate short identities and numbers using their field cue or a leading product designation. */
@@ -196,7 +199,7 @@ export function reconcileDescriptionMetadata(
 	current: ReviewItem,
 	updates: Partial<ReviewItem>
 ): Partial<ReviewItem> {
-	if (Object.hasOwn(updates, 'description')) {
+	if (Object.hasOwn(updates, 'description') && updates.description !== current.description) {
 		return current.descriptionSource ? { ...updates, descriptionSource: undefined } : updates;
 	}
 	if (

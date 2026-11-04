@@ -516,3 +516,11 @@ def test_a_serial_in_prose_cannot_hide_a_model_with_the_same_value(value):
     )
     both = f"Device, model {value}, serial {value}."
     assert aggregate_description(both, serial_number=value, model_number=value) == both
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_model_cue_on_another_line_cannot_claim_a_short_brand(newline):
+    original = f"Spare part{newline}A7 relay."
+    assert aggregate_description(original, manufacturer="A7", model_number="A7") == (
+        f"{original} Part/model number: A7."
+    )

@@ -34,9 +34,11 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 
 # The review editor uses these same cues when correcting prose.
 NARRATIVE_FIELD_CUES = {
-    "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)\s*[#:=]?\s*$", re.I),
-    "Part/model number": re.compile(r"\b(?:(?:model|part)(?:\s+(?:number|no\.?))?|mpn|p/n)\s*[#:=]?\s*$", re.I),
-    "Serial number": re.compile(r"\b(?:serial(?:\s+(?:number|no\.?))?|s/n)\s*[#:=]?\s*$", re.I),
+    "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
+    "Part/model number": re.compile(
+        r"\b(?:(?:model|part)(?:[ \t]+(?:number|no\.?))?|mpn|p/n)[ \t]*[#:=]?[ \t]*\Z", re.I
+    ),
+    "Serial number": re.compile(r"\b(?:serial(?:[ \t]+(?:number|no\.?))?|s/n)[ \t]*[#:=]?[ \t]*\Z", re.I),
 }
 
 
