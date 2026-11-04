@@ -11,6 +11,7 @@ type IdentityField = keyof typeof METADATA_LABELS;
 const IDENTITY_FIELDS = Object.keys(METADATA_LABELS) as IdentityField[];
 const HSPACE = /[\p{Zs}\t]/u.source;
 const LINE_BREAK = /(?:\r\n|[\r\n\v\f\u0085\u2028\u2029])/u;
+const SAME_LINE_CONTENT = new RegExp(String.raw`${HSPACE}*[^\s\u0085]`, 'uy');
 const HORIZONTAL_SPACING = /[\p{Zs}\t]+/gu;
 
 function escapeRegex(value: string): string {
@@ -120,8 +121,9 @@ function changeIdentifier(
 				}
 				if (!newValue || represented) {
 					if (leading.startsWith(',')) return punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';
-					const sameLine = parts.metadata.slice(offset + matched.length).split(LINE_BREAK, 1)[0];
-					return LINE_BREAK.test(leading) && sameLine.trim() ? leading : '';
+					if (!LINE_BREAK.test(leading)) return '';
+					SAME_LINE_CONTENT.lastIndex = offset + matched.length;
+					return SAME_LINE_CONTENT.test(parts.metadata) ? leading : '';
 				}
 				represented = true;
 				const end = punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';

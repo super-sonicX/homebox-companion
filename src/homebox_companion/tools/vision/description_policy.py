@@ -19,6 +19,7 @@ DESCRIPTION_OVERFLOW = (
 HSPACE = r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
 LINE_CHARACTERS = r"\r\n\v\f\u0085\u2028\u2029"
 LINE_BREAK = rf"(?:\r\n|[{LINE_CHARACTERS}])"
+SAME_LINE_CONTENT = re.compile(rf"{HSPACE}*\S")
 # Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
 CLAUSE_START = rf"(?:^{HSPACE}*|(?<=[.;!?]){HSPACE}+|{LINE_BREAK}{HSPACE}*)"
 TECHNICAL_CLAUSE_START = rf"(?:,{HSPACE}*|{CLAUSE_START})"
@@ -274,8 +275,9 @@ def remove_superseded_generated_identifiers(
                 # Keep authored annotations with the identity they describe, even after a correction.
                 leading = match["leading"]
                 return f"{leading}Previous {label.lower()}{match[0][len(leading) + len(label) :]}"
-            same_line = re.split(LINE_BREAK, match.string[match.end() :], maxsplit=1)[0].strip()
-            return match["leading"] if re.search(LINE_BREAK, match["leading"]) and same_line else ""
+            if re.search(LINE_BREAK, match["leading"]) and SAME_LINE_CONTENT.match(match.string, match.end()):
+                return match["leading"]
+            return ""
 
         text = clause.sub(replace_stale, text)
     return text.strip()

@@ -481,3 +481,18 @@ async def test_create_recognizes_unicode_line_boundaries_around_an_identity(gate
     if desired:
         expected += " Manufacturer: NewCo."
     assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_many_removed_manufacturer_lines_leave_only_their_authored_notes(gateway):
+    rows = ["Manufacturer: Old. Keep dry."] + ["Manufacturer: Old."] * 36 + ["Manufacturer: Old. Keep sealed."]
+    item = {
+        "name": "Relay",
+        "description": "Relay.\n" + "\n".join(rows),
+        "manufacturer": None,
+        "previous_identifiers": {"manufacturer": "Old"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    saved_text = gateway.create_item.call_args.args[0].description
+    assert [row.strip() for row in saved_text.splitlines()] == ["Relay.", "Keep dry.", "Keep sealed."]
