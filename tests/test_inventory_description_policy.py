@@ -585,3 +585,11 @@ def test_an_adapter_target_introduced_by_for_does_not_supply_its_manufacturer():
     assert aggregate_description(text, manufacturer="Acme") == f"{text} Manufacturer: Acme."
     own_brand = "Acme adapter for Acme sockets."
     assert aggregate_description(own_brand, manufacturer="Acme") == own_brand
+
+
+@pytest.mark.parametrize(
+    ("field", "label"), [("model_number", "Part/model number"), ("serial_number", "Serial number")]
+)
+def test_an_adapter_target_cannot_supply_the_items_model_or_serial(field, label):
+    text = "Adapter for ABC-123 sockets."
+    assert aggregate_description(text, **{field: "ABC-123"}) == f"{text} {label}: ABC-123."

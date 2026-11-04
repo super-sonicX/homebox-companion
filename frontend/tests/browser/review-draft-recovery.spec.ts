@@ -60,7 +60,10 @@ test('model edits survive keystrokes, photo replacement and draft recovery', asy
 	await expect(description).toHaveValue('Bracket, model NEW-456.');
 	await description.fill('Manual note for NEW-456.');
 	await model.fill('ABC-1');
-	await expect(description).toHaveValue('Manual note for ABC-1.');
+	await expect(description).toHaveValue('Manual note for NEW-456. Part/model number: ABC-1.');
+	await description.fill('Revised note, model ABC-1.');
+	await model.fill('ZZZ-8');
+	await expect(description).toHaveValue('Revised note, model ZZZ-8.');
 });
 
 test('clearing a heading keeps its following note protected after reload and a second edit', async ({

@@ -666,3 +666,22 @@ test('the maker in an adapter description changes independently of a target intr
 		);
 	}
 });
+
+test('changing model or serial protects repeated identifiers referenced as compatibility targets', () => {
+	for (const [field, label] of [
+		['model_number', 'Part/model number'],
+		['serial_number', 'Serial number'],
+	]) {
+		const input = { [field]: 'ABC-123' };
+		const first = current({ ...input, description: 'ABC-123 adapter for ABC-123 sockets.' });
+		assert.equal(
+			reconcileDescriptionMetadata(first, { [field]: 'DEF-456' }).description,
+			'DEF-456 adapter for ABC-123 sockets.'
+		);
+		const target = current({ ...input, description: 'Adapter for ABC-123 and DEF-456 sockets.' });
+		assert.equal(
+			reconcileDescriptionMetadata(target, { [field]: 'DEF-456' }).description,
+			'Adapter for ABC-123 and DEF-456 sockets. ' + label + ': DEF-456.'
+		);
+	}
+});

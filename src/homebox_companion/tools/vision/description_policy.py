@@ -115,7 +115,7 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
         before = HORIZONTAL_SPACING.sub(" ", narrative[: match.start()])
         cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
         sentence = _sentence_prefix(before)
-        if COMPATIBILITY_REFERENCE.search(sentence) or (label == "Manufacturer" and FOR_TARGET.search(sentence)):
+        if COMPATIBILITY_REFERENCE.search(sentence) or FOR_TARGET.search(sentence):
             _, comma, field_prefix = sentence.rpartition(",")
             if not (comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())):
                 continue
