@@ -309,3 +309,30 @@ test('short numeric identities need a cue specific to their field', () => {
 	const update = reconcileDescriptionMetadata(item, { model_number: '45', serial_number: '67' });
 	assert.equal(update.description, '12 ports, model 45, serial 67, 34 spares.');
 });
+
+test('unpunctuated technical headings can be changed and cleared without touching later lines', () => {
+	for (const note of ['', '\nKeep dry.', '\r\nKeep dry.']) {
+		const original = current({
+			description: 'Controller. Voltage: 12V' + note,
+			custom_fields: { Voltage: '12V' },
+		});
+		const changed = reconcileDescriptionMetadata(original, { custom_fields: { Voltage: '24V' } });
+		assert.equal(changed.description, 'Controller. Voltage: 24V' + note);
+		const cleared = reconcileDescriptionMetadata(
+			{ ...original, ...changed },
+			{ custom_fields: {} }
+		);
+		assert.equal(cleared.description, 'Controller.' + note);
+	}
+});
+
+test('a newly excluded currency value cannot leave the old technical rating behind', () => {
+	const item = current({
+		description: 'Controller. Voltage: 12V.',
+		custom_fields: { Voltage: '12V' },
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '£24' } }).description,
+		'Controller.'
+	);
+});

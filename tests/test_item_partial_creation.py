@@ -311,3 +311,12 @@ async def test_ambiguous_company_and_warning_require_matching_source(gateway, pr
             gateway.create_item.call_args.args[0].description
             == f"Relay. {note}Keep away from heat. Manufacturer: NewCo."
         )
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_an_unpunctuated_manufacturer_at_the_description_limit(gateway):
+    tail = ".\nManufacturer: Acme\nKeep dry."
+    description = "x" * (1000 - len(tail)) + tail
+    response = await submit(gateway, [{"name": "Relay", "description": description, "manufacturer": "Acme"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == description

@@ -102,7 +102,7 @@ def aggregate_description(
         if not value:
             continue
         own_clause = re.compile(
-            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}(?=[.;!?](?:\s|$)|$)",
+            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}(?=[.;!?](?:\s|$)|[ \t]*(?:\r?\n|$))",
             re.IGNORECASE,
         )
         token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)

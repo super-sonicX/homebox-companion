@@ -47,7 +47,7 @@ function changeIdentifier(
 
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?])(?=\\s|$)`,
+			`(${CLAUSE_START})${escapeRegex(label)}:[ \\t]*${escapeRegex(value)}([.;!?](?=\\s|$)|(?=[ \\t]*(?:\\r?\\n|$)))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -225,9 +225,12 @@ export function reconcileDescriptionMetadata(
 		for (const key of new Set([...Object.keys(oldFields), ...Object.keys(newFields)])) {
 			if (!IDENTIFIER_NAME_PATTERN.test(key)) continue;
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
-			if (/^[£$€]/.test((newFields[key] ?? oldFields[key] ?? '').trim())) continue;
-			if ((oldFields[key] ?? '') === (newFields[key] ?? '')) continue;
-			changeIdentifier(parts, key, oldFields[key], newFields[key]);
+			const oldValue = oldFields[key]?.trim() ?? '';
+			const newValue = newFields[key]?.trim() ?? '';
+			const previous = /^[£$€]/.test(oldValue) ? '' : oldValue;
+			const replacement = /^[£$€]/.test(newValue) ? '' : newValue;
+			if (previous === replacement) continue;
+			changeIdentifier(parts, key, previous, replacement);
 			changed = true;
 		}
 	}

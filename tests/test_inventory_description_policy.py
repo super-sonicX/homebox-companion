@@ -492,3 +492,9 @@ def test_unrelated_numeric_quantity_does_not_suppress_a_model_number():
     assert aggregate_description("A switch with 24 ports.", model_number="24") == (
         "A switch with 24 ports. Part/model number: 24."
     )
+
+
+@pytest.mark.parametrize("ending", ["", "\nKeep dry.", "\r\nKeep dry."])
+def test_unpunctuated_labelled_specification_ends_at_the_line_boundary(ending):
+    description = f"Controller. Voltage: 12V{ending}"
+    assert aggregate_description(description, custom_fields={"Voltage": "12V"}) == description
