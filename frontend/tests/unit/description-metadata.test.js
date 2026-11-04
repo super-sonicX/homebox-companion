@@ -623,3 +623,29 @@ test('metadata on Unicode-separated lines can be changed and cleared without swa
 		);
 	}
 });
+
+test('comma-separated technical ratings replace or clear the actual field and any legacy duplicate', () => {
+	for (const duplicate of ['', ' Current: 2A.']) {
+		const item = current({
+			description: 'Controller. Voltage: 12V, Current: 2A.' + duplicate,
+			custom_fields: { Voltage: '12V', Current: '2A' },
+		});
+		assert.equal(
+			reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '12V', Current: '3A' } })
+				.description,
+			'Controller. Voltage: 12V, Current: 3A.'
+		);
+		assert.equal(
+			reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '12V' } }).description,
+			'Controller. Voltage: 12V.'
+		);
+	}
+	const first = current({
+		description: 'Controller, Current: 2A.',
+		custom_fields: { Current: '2A' },
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(first, { custom_fields: {} }).description,
+		'Controller.'
+	);
+});

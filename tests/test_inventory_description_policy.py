@@ -562,3 +562,19 @@ def test_a_manufacturer_named_after_a_compatibility_clause_is_still_recognized()
 def test_a_decimal_or_abbreviation_does_not_end_a_compatibility_statement(detail):
     text = f"Fits {detail} Acme sockets."
     assert aggregate_description(text, manufacturer="Acme") == f"{text} Manufacturer: Acme."
+
+
+def test_detection_does_not_duplicate_a_comma_separated_technical_rating():
+    text = "Controller. Voltage: 12V, Current: 2A."
+    assert aggregate_description(text, custom_fields={"Voltage": "12V", "Current": "2A"}) == text
+
+
+def test_aggregation_stops_reading_eligible_fields_when_the_description_is_full():
+    class ManyFields(dict):
+        def items(self):
+            for index in range(10000):
+                assert index < 100, "aggregation kept consuming fields after exceeding the output limit"
+                yield f"Voltage rating {index}", "12V"
+
+    with pytest.raises(ValueError, match="1000 characters"):
+        aggregate_description("Controller.", custom_fields=ManyFields(unused=""))

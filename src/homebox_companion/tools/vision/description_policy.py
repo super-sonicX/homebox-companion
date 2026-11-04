@@ -8,6 +8,7 @@ serial and useful part references must also be visible there even when the AI
 from __future__ import annotations
 
 import re
+from itertools import chain
 
 MAX_DESCRIPTION_LENGTH = 1000
 DESCRIPTION_OVERFLOW = (
@@ -20,6 +21,7 @@ LINE_CHARACTERS = r"\r\n\v\f\u0085\u2028\u2029"
 LINE_BREAK = rf"(?:\r\n|[{LINE_CHARACTERS}])"
 # Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
 CLAUSE_START = rf"(?:^{HSPACE}*|(?<=[.;!?]){HSPACE}+|{LINE_BREAK}{HSPACE}*)"
+TECHNICAL_CLAUSE_START = rf"(?:,{HSPACE}*|{CLAUSE_START})"
 
 INVENTORY_DESCRIPTION_GUIDANCE = (
     "INVENTORY DESCRIPTION POLICY (mandatory, even when field preferences differ):\n"
@@ -60,13 +62,22 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     """Separate narrative identity cues from named fields and authored notes."""
     if ":" not in text:
         return text
-    protected = {label.casefold() for label in NARRATIVE_FIELD_CUES}
-    protected.update(label.strip().casefold() for label in custom_fields or {} if len(label) <= len(text))
-    # Look up only literal headings found in the bounded description, without compiling caller-provided keys.
-    for leading in re.finditer(CLAUSE_START, text):
+    identities = {label.casefold() for label in NARRATIVE_FIELD_CUES}
+    candidates = []
+    for leading in re.finditer(TECHNICAL_CLAUSE_START, text):
         colon = text.find(":", leading.end())
-        if colon >= 0 and text[leading.end() : colon].strip().casefold() in protected:
-            text = text[: leading.start()]
+        if colon >= 0:
+            label = text[leading.end() : colon].strip().casefold()
+            if not (leading[0].startswith(",") and label in identities):
+                candidates.append((leading.start(), label))
+    # Retain only names present in the bounded description, regardless of the size of the input mapping.
+    wanted = {label for _, label in candidates}
+    protected = identities | {
+        label for key in custom_fields or {} if len(key) <= len(text) and (label := key.strip().casefold()) in wanted
+    }
+    for offset, label in candidates:
+        if label in protected:
+            text = text[:offset]
             break
     start = 0
     for mark in HEADING_MARKS.finditer(text):
@@ -163,18 +174,16 @@ def aggregate_description(
         r"(?<!\w)(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?!\w)",
         re.IGNORECASE,
     )
-    for key, value in (custom_fields or {}).items():
-        name = key.casefold() if key else ""
-        if (
-            name
-            and value
-            and identifier_name.search(name)
-            and not financial_name.search(name)
-            and not str(value).strip().startswith(("£", "$", "€"))
-        ):
-            values.append((key, value, True))
-
-    for label, value, require_label in values:
+    custom_identifiers = (
+        (key, value, True)
+        for key, value in (custom_fields or {}).items()
+        if key
+        and value
+        and identifier_name.search(key)
+        and not financial_name.search(key)
+        and not value.lstrip().startswith(("£", "$", "€"))
+    )
+    for label, value, require_label in chain(values, custom_identifiers):
         value = (value or "").strip()
         # A value is already present only if the complete identifier appears.
         # Plain substring checks can mistake "GE" in "voltage", "2" in
@@ -185,8 +194,9 @@ def aggregate_description(
             require_label and len(label) + 1 + len(value) > MAX_DESCRIPTION_LENGTH
         ):
             raise ValueError(DESCRIPTION_OVERFLOW)
+        clause_start = TECHNICAL_CLAUSE_START if require_label else CLAUSE_START
         own_clause = re.compile(
-            rf"{CLAUSE_START}{re.escape(label)}{HSPACE}*:{HSPACE}*{re.escape(value)}"
+            rf"{clause_start}{re.escape(label)}{HSPACE}*:{HSPACE}*{re.escape(value)}"
             rf"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|{HSPACE}*(?:[([]|{LINE_BREAK}|$)))",
             re.IGNORECASE,
         )

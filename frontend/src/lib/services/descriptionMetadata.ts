@@ -27,6 +27,8 @@ function identifierPattern(...values: string[]): RegExp {
 
 // Keep this delimiter in sync with description_policy.CLAUSE_START.
 const CLAUSE_START = String.raw`(?:^${HSPACE}*|(?<=[.;!?])${HSPACE}+|${LINE_BREAK.source}${HSPACE}*)`;
+const TECHNICAL_CLAUSE_START = `(?:,${HSPACE}*|${CLAUSE_START})`;
+const IDENTITY_LABELS = new Set(Object.values(METADATA_LABELS).map((label) => label.toLowerCase()));
 
 const HEADING_MARKS = /:|[\r\n\v\f\u0085\u2028\u2029]|(?<=[,.;!?])(?=[\p{Zs}\t])/gu;
 const HISTORICAL_HEADING =
@@ -39,10 +41,11 @@ function narrativeBoundary(text: string, labels: readonly string[]): number {
 		labels.filter((label) => label.length <= text.length).map((label) => label.trim().toLowerCase())
 	);
 	let end = text.length;
-	for (const leading of text.matchAll(new RegExp(CLAUSE_START, 'gu'))) {
+	for (const leading of text.matchAll(new RegExp(TECHNICAL_CLAUSE_START, 'gu'))) {
 		const offset = leading.index + leading[0].length;
 		const colon = text.indexOf(':', offset);
-		if (colon >= 0 && protectedNames.has(text.slice(offset, colon).trim().toLowerCase())) {
+		const label = colon < 0 ? '' : text.slice(offset, colon).trim().toLowerCase();
+		if (protectedNames.has(label) && !(leading[0].startsWith(',') && IDENTITY_LABELS.has(label))) {
 			end = leading.index;
 			break;
 		}
@@ -77,9 +80,10 @@ function changeIdentifier(
 	const newValue = (next ?? '').trim();
 	if (oldValue === newValue) return;
 
+	const clauseStart = identity ? CLAUSE_START : TECHNICAL_CLAUSE_START;
 	const clausePattern = (value: string) =>
 		new RegExp(
-			`(${CLAUSE_START})${escapeRegex(label)}${HSPACE}*:${HSPACE}*${escapeRegex(value)}(?:([.;!?]?${HSPACE}*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=${HSPACE}*(?:${LINE_BREAK.source}|$))))`,
+			`(${clauseStart})${escapeRegex(label)}${HSPACE}*:${HSPACE}*${escapeRegex(value)}(?:([.;!?]?${HSPACE}*[([])|([,.;!?](?=\\s|$)|(?<=[.;!?])(?=\\s|$)|(?=${HSPACE}*(?:${LINE_BREAK.source}|$))))`,
 			'giu'
 		);
 	let represented = Boolean(
@@ -115,6 +119,7 @@ function changeIdentifier(
 					return leading + 'Previous ' + label[0].toLowerCase() + label.slice(1) + suffix;
 				}
 				if (!newValue || represented) {
+					if (leading.startsWith(',')) return punctuation || oldValue.match(/[.;!?]$/)?.[0] || '';
 					const sameLine = parts.metadata.slice(offset + matched.length).split(LINE_BREAK, 1)[0];
 					return LINE_BREAK.test(leading) && sameLine.trim() ? leading : '';
 				}
