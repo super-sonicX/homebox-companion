@@ -54,6 +54,36 @@ test('model edits reconcile the complete identifier across keystrokes and draft 
 	await expect(description).toHaveValue('Manual note for ABC-1.');
 });
 
+test('clearing a heading keeps its following note protected after reload and a second edit', async ({
+	page,
+	api,
+}) => {
+	api.allowPageError(/navigation aborted/);
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Relay',
+					quantity: 1,
+					manufacturer: 'WrongCo',
+					model_number: 'OLD-123',
+					description: 'Relay. Manufacturer: WrongCo. Safety: OLD-123 is hazardous.',
+				},
+			],
+		})
+	);
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByLabel('Manufacturer', { exact: true }).fill('');
+	await saved(page);
+	await resume(page);
+	await page.getByLabel('Model Number', { exact: true }).fill('NEW-456');
+	await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+		'Relay. Safety: OLD-123 is hazardous. Part/model number: NEW-456.'
+	);
+});
+
 test('unconfirmed rich edits and ordered replacement photos recover, including summary editing', async ({
 	page,
 	api,
@@ -167,7 +197,13 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	]);
 	expect(uploads).toHaveLength(2);
 	const payload = JSON.stringify(creations);
-	for (const internal of ['reviewId', 'activeReviewDraft', 'photos', 'sourceImageIndex'])
+	for (const internal of [
+		'reviewId',
+		'descriptionSource',
+		'activeReviewDraft',
+		'photos',
+		'sourceImageIndex',
+	])
 		expect(payload).not.toContain(`"${internal}"`);
 });
 

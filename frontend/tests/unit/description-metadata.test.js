@@ -246,3 +246,28 @@ test('a bulk clear and replacement keep the original boundary for every field', 
 		'Relay. Safety: OLD-123 is hazardous. Part/model number: NEW-456.'
 	);
 });
+
+test('re-rendering all fields does not replace an identifier inserted by a different edit', () => {
+	let item = current({
+		description: 'ACME module, model SONY.',
+		manufacturer: 'ACME',
+		model_number: 'SONY',
+	});
+	item = { ...item, ...reconcileDescriptionMetadata(item, { manufacturer: 'SONY' }) };
+	item = { ...item, ...reconcileDescriptionMetadata(item, { model_number: 'ABC-123' }) };
+	assert.equal(item.description, 'SONY module, model ABC-123.');
+});
+
+test('returning every field to its starting value restores the original narrative and notes', () => {
+	const original = 'Relay. Manufacturer: WrongCo. Safety: OLD-123 is hazardous.';
+	let item = current({ description: original, manufacturer: 'WrongCo', model_number: 'OLD-123' });
+	for (const fields of [
+		{ manufacturer: '' },
+		{ model_number: 'NEW-456' },
+		{ manufacturer: 'WrongCo' },
+		{ model_number: 'OLD-123' },
+	]) {
+		item = { ...item, ...reconcileDescriptionMetadata(item, fields) };
+	}
+	assert.equal(item.description, original);
+});

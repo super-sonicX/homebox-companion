@@ -1,5 +1,5 @@
 /** Keep search descriptions aligned with metadata edits in the review form. */
-import type { ReviewItem } from '$lib/types';
+import type { DescriptionSource, ReviewItem } from '$lib/types';
 
 const METADATA_LABELS = {
 	manufacturer: 'Manufacturer',
@@ -9,30 +9,14 @@ const METADATA_LABELS = {
 
 type IdentityField = keyof typeof METADATA_LABELS;
 
-export interface IdentityEdit {
-	reviewId: string;
-	field: IdentityField;
-	previousValue: ReviewItem[IdentityField];
-	description: ReviewItem['description'];
-}
-
-/** Only single-field input events continue a typing session. Bulk updates use their own description. */
-export function editedIdentityField(updates: Partial<ReviewItem>): IdentityField | undefined {
-	const keys = Object.keys(updates);
-	const key = keys[0];
-	return keys.length === 1 && Object.hasOwn(METADATA_LABELS, key)
-		? (key as IdentityField)
-		: undefined;
-}
-
 function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Match a complete identifier: GE must not match "voltage" or "ABC-123" match "ABC-123.4". */
-function identifierPattern(value: string): RegExp {
+function identifierPattern(...values: string[]): RegExp {
 	return new RegExp(
-		`(?<![\\p{L}\\p{N}_./-])${escapeRegex(value)}(?![\\p{L}\\p{N}_-]|[\\./][\\p{L}\\p{N}_])`,
+		`(?<![\\p{L}\\p{N}_./-])(?:${values.map(escapeRegex).join('|')})(?![\\p{L}\\p{N}_-]|[\\./][\\p{L}\\p{N}_])`,
 		'giu'
 	);
 }
@@ -82,12 +66,6 @@ function changeIdentifier(
 	const oldValue = (previous ?? '').trim();
 	const newValue = (next ?? '').trim();
 	if (oldValue === newValue) return;
-
-	const distinctive =
-		/[\p{L}_/-]/u.test(oldValue) && oldValue.length >= (label === 'Manufacturer' ? 2 : 3);
-	if (isIdentity && distinctive && newValue) {
-		parts.narrative = parts.narrative.replace(identifierPattern(oldValue), () => newValue);
-	}
 
 	const clausePattern = (value: string) =>
 		new RegExp(
@@ -147,35 +125,78 @@ const IDENTIFIER_NAME_PATTERN = new RegExp(
 const FINANCIAL_NAME_PATTERN =
 	/(?<![\p{L}\p{N}_])(?:price|cost|amount|payment|invoice|receipt|shipping|postage|tax|vat|discount)(?![\p{L}\p{N}_])/iu;
 
-/** Preserve explicit description edits; sync when metadata changes by itself. */
+/** Replace matching original tokens once. A new brand can itself be the old model. */
+function reconcileNarrative(
+	narrative: string,
+	source: DescriptionSource,
+	next: DescriptionSource
+): string {
+	const replacements = new Map<string, string | null>();
+	for (const field of Object.keys(METADATA_LABELS) as IdentityField[]) {
+		const oldValue = (source[field] ?? '').trim();
+		if (!/[\p{L}_/-]/u.test(oldValue) || oldValue.length < (field === 'manufacturer' ? 2 : 3))
+			continue;
+		const key = oldValue.toLocaleLowerCase();
+		const newValue = (next[field] ?? '').trim();
+		const replacement = newValue && newValue !== oldValue ? newValue : null;
+		replacements.set(
+			key,
+			replacements.has(key) && replacements.get(key) !== replacement ? null : replacement
+		);
+	}
+	if (!replacements.size) return narrative;
+	const pattern = identifierPattern(
+		...Array.from(replacements.keys()).sort((a, b) => b.length - a.length)
+	);
+	return narrative.replace(
+		pattern,
+		(matched) => replacements.get(matched.toLocaleLowerCase()) ?? matched
+	);
+}
+
+/** Preserve explicit description edits; re-render automatic edits from the last authored description. */
 export function reconcileDescriptionMetadata(
 	current: ReviewItem,
 	updates: Partial<ReviewItem>
 ): Partial<ReviewItem> {
-	if (Object.prototype.hasOwnProperty.call(updates, 'description')) return updates;
-	const description = current.description ?? '';
+	if (Object.hasOwn(updates, 'description')) {
+		return current.descriptionSource ? { ...updates, descriptionSource: undefined } : updates;
+	}
+	if (
+		!Object.keys(updates).some(
+			(key) => key === 'custom_fields' || Object.hasOwn(METADATA_LABELS, key)
+		)
+	)
+		return updates;
+	const source = current.descriptionSource ?? {
+		description: current.description,
+		manufacturer: current.manufacturer,
+		model_number: current.model_number,
+		serial_number: current.serial_number,
+		custom_fields: current.custom_fields ? { ...current.custom_fields } : current.custom_fields,
+	};
+	const next = { ...current, ...updates };
+	const description = source.description ?? '';
 	const protectedLabels = [
 		...Object.values(METADATA_LABELS),
-		...Object.keys(current.custom_fields ?? {}),
-		...Object.keys(updates.custom_fields ?? {}),
+		...Object.keys(source.custom_fields ?? {}),
+		...Object.keys(next.custom_fields ?? {}),
 	];
 	const boundary = narrativeBoundary(description, protectedLabels);
 	const parts = {
-		narrative: description.slice(0, boundary),
+		narrative: reconcileNarrative(description.slice(0, boundary), source, next),
 		metadata: description.slice(boundary),
 	};
 	let changed = false;
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
-		if (!Object.prototype.hasOwnProperty.call(updates, key)) continue;
-		const next = updates[key];
-		if (next === current[key]) continue;
-		changeIdentifier(parts, label, current[key], next, protectedLabels, true);
+		if (next[key] === source[key]) continue;
+		changeIdentifier(parts, label, source[key], next[key], protectedLabels, true);
 		changed = true;
 	}
-	if (Object.prototype.hasOwnProperty.call(updates, 'custom_fields')) {
-		const oldFields = current.custom_fields ?? {};
-		const newFields = updates.custom_fields ?? {};
+	if (source.custom_fields || next.custom_fields) {
+		const oldFields = source.custom_fields ?? {};
+		const newFields = next.custom_fields ?? {};
 		for (const key of new Set([...Object.keys(oldFields), ...Object.keys(newFields)])) {
 			if (!IDENTIFIER_NAME_PATTERN.test(key)) continue;
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
@@ -185,5 +206,10 @@ export function reconcileDescriptionMetadata(
 			changed = true;
 		}
 	}
-	return changed ? { ...updates, description: (parts.narrative + parts.metadata).trim() } : updates;
+	if (!changed && !current.descriptionSource) return updates;
+	return {
+		...updates,
+		descriptionSource: changed ? source : undefined,
+		description: changed ? (parts.narrative + parts.metadata).trim() : source.description,
+	};
 }
