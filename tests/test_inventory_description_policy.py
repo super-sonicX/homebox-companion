@@ -347,3 +347,79 @@ def test_only_whole_word_technical_field_names_are_aggregated():
     assert "Concurrent Users" not in result
     assert "Current Rating: 12A." in result
     assert "Supplier Part Number: A-123." in result
+
+
+def test_initialled_dotted_manufacturer_names_are_not_split_into_prose():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Relay. Manufacturer: A. O. Smith."
+    assert (
+        remove_superseded_generated_identifiers(
+            raw, manufacturer="A. O. Smith", explicitly_updated=frozenset({"manufacturer"})
+        )
+        == raw
+    )
+    for replacement in ("NewCo", None):
+        cleaned = remove_superseded_generated_identifiers(
+            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+        )
+        assert cleaned == "Relay."
+
+
+def test_dotted_manufacturer_names_followed_by_safety_prose_remain_intact():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Relay. Manufacturer: A. O. Smith. Keep disconnected until installed."
+    for replacement in ("A. O. Smith", "NewCo", None):
+        cleaned = remove_superseded_generated_identifiers(
+            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+        )
+        assert "Keep disconnected until installed." in cleaned
+        if replacement == "A. O. Smith":
+            assert cleaned == raw
+        else:
+            assert "A. O. Smith" not in cleaned
+
+
+def test_one_initial_plus_surname_is_preserved_or_removed_whole():
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = "Relay. Manufacturer: A. Smith."
+    assert (
+        remove_superseded_generated_identifiers(
+            raw, manufacturer="A. Smith", explicitly_updated=frozenset({"manufacturer"})
+        )
+        == raw
+    )
+    assert (
+        remove_superseded_generated_identifiers(
+            raw, manufacturer="NewCo", explicitly_updated=frozenset({"manufacturer"})
+        )
+        == "Relay."
+    )
+
+
+@pytest.mark.parametrize("name", ["W. L. Gore", "St. Jude", "Dr. Martens", "A. O. Smith"])
+def test_dotted_brands_are_preserved_when_unchanged_with_or_without_following_prose(name):
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    for extra in ("", " Keep disconnected until installed."):
+        raw = f"Relay. Manufacturer: {name}.{extra}"
+        assert (
+            remove_superseded_generated_identifiers(
+                raw, manufacturer=name, explicitly_updated=frozenset({"manufacturer"})
+            )
+            == raw
+        )
+
+
+@pytest.mark.parametrize("name", ["W. L. Gore", "St. Jude", "Dr. Martens", "A. O. Smith"])
+def test_correcting_dotted_brands_preserves_user_prose(name):
+    from homebox_companion.tools.vision.description_policy import remove_superseded_generated_identifiers
+
+    raw = f"Relay. Manufacturer: {name}. Keep disconnected until installed."
+    cleaned = remove_superseded_generated_identifiers(
+        raw, manufacturer="NewBrand", explicitly_updated=frozenset({"manufacturer"})
+    )
+    assert "Keep disconnected until installed." in cleaned
+    assert name not in cleaned

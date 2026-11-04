@@ -230,3 +230,30 @@ async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway
     created = gateway.create_item.call_args.args[0]
     assert "Acme" not in created.description and "Ltd" not in created.description
     assert "NewCo" in created.description and "Part/model number: P-1." in created.description
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manufacturer", ["Acme", "A. O. Smith", "St. Jude", "Dr. Martens"])
+@pytest.mark.parametrize("submitted", ["unchanged", "corrected", "cleared"])
+async def test_create_never_drops_user_safety_notes_after_generated_metadata(gateway, manufacturer, submitted):
+    submitted_manufacturer = manufacturer if submitted == "unchanged" else "NewCo" if submitted == "corrected" else None
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed.",
+                "manufacturer": submitted_manufacturer,
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Keep disconnected until installed." in created.description
+    if submitted == "corrected":
+        assert "Manufacturer: NewCo." in created.description
+        assert f"Manufacturer: {manufacturer}." not in created.description
+    elif submitted == "cleared":
+        assert f"Manufacturer: {manufacturer}." not in created.description
+    else:
+        assert f"Manufacturer: {manufacturer}." in created.description

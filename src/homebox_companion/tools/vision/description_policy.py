@@ -119,10 +119,23 @@ def _split_identifier_and_following_prose(value: str) -> tuple[str, str]:
     for boundary in re.finditer(r"\. +(?=\S)", value):
         before = value[: boundary.start()].strip()
         after = value[boundary.end() :].strip()
-        last_word = before.rsplit(" ", 1)[-1].casefold()
-        next_word = after.split(" ", 1)[0].casefold().strip(".")
+        last_word = before.rsplit(" ", 1)[-1]
+        next_word = after.split(" ", 1)[0].strip(".")
         legal_suffixes = {"inc", "ltd", "co", "corp", "llc", "limited"}
-        if last_word in legal_suffixes and next_word in legal_suffixes:
+        if last_word.casefold() in legal_suffixes and next_word.casefold() in legal_suffixes:
+            continue
+        # Common dotted prefixes belong to a manufacturer name, not to a
+        # separate user sentence (for example "St. Jude" or "Dr. Martens").
+        if last_word.casefold() in {"st", "dr", "mr", "mrs", "ms", "prof", "rev"} and next_word[:1].isupper():
+            continue
+        # Initialled manufacturer names such as "A. O. Smith" are one
+        # identifier, not three separate sentences. Avoid extending across
+        # ordinary safety notes that start with a capitalised word.
+        if len(last_word) == 1 and last_word.isupper() and next_word[:1].isupper():
+            if len(next_word) == 1 or ". " in before:
+                continue
+        # A single initial followed by a single surname is also a valid name.
+        if re.fullmatch(r"[A-Z]\. [A-Z][a-z]+", value):
             continue
         return before, after
     return value.strip(), ""
@@ -167,7 +180,12 @@ def remove_superseded_generated_identifiers(
         desired = (expected or "").strip().casefold()
 
         def replace_stale(match: re.Match[str], *, desired: str = desired) -> str:
-            identifier, following_prose = _split_identifier_and_following_prose(match.group("value"))
+            captured_value = match.group("value").strip()
+            if desired and (
+                captured_value.casefold() == desired or captured_value.casefold().startswith(f"{desired}. ")
+            ):
+                return match.group(0)
+            identifier, following_prose = _split_identifier_and_following_prose(captured_value)
             if identifier.casefold() == desired:
                 return match.group(0)
             # The appended metadata is superseded, but a later user sentence
