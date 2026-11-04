@@ -530,3 +530,11 @@ def test_colon_bearing_identity_cues_are_read_only_before_authored_headings():
     text = "Device, model: A7, serial: B2. Safety: model: Z9 is recalled."
     assert aggregate_description(text, model_number="A7", serial_number="B2") == text
     assert aggregate_description(text, model_number="Z9") == f"{text} Part/model number: Z9."
+
+
+@pytest.mark.parametrize("gap", ["\u00a0", "\u202f", "\u3000", "\t"])
+def test_unicode_horizontal_spaces_keep_serial_numbers_distinct_from_models(gap):
+    text = f"Device, serial{gap}number:{gap}ABC-123."
+    assert aggregate_description(text, model_number="ABC-123", serial_number="ABC-123") == (
+        f"{text} Part/model number: ABC-123."
+    )

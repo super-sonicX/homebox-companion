@@ -8,6 +8,8 @@ const METADATA_LABELS = {
 } as const;
 
 type IdentityField = keyof typeof METADATA_LABELS;
+const IDENTITY_FIELDS = Object.keys(METADATA_LABELS) as IdentityField[];
+const HORIZONTAL_SPACING = /[\p{Zs}\t]+/gu;
 
 function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -31,7 +33,10 @@ function narrativeBoundary(text: string, labels: readonly string[]): number {
 	const protectedNames = new Set(labels.map((label) => label.trim().toLowerCase()));
 	for (const match of text.matchAll(pattern)) {
 		const heading = match[1].trim().toLowerCase();
-		const cue = heading.slice(heading.lastIndexOf(',') + 1).trim();
+		const cue = heading
+			.slice(heading.lastIndexOf(',') + 1)
+			.trim()
+			.replace(HORIZONTAL_SPACING, ' ');
 		if (
 			protectedNames.has(heading) ||
 			!IDENTITY_CUES.some(({ pattern }) => pattern.exec(cue)?.index === 0)
@@ -152,7 +157,7 @@ function narrativeIdentityMatches(
 	field: IdentityField,
 	name: string
 ): boolean {
-	const before = text.slice(0, offset);
+	const before = text.slice(0, offset).replace(HORIZONTAL_SPACING, ' ');
 	const cue = IDENTITY_CUES.find(({ pattern }) => pattern.test(before));
 	if (cue) return cue.field === field;
 	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
@@ -179,13 +184,11 @@ function reconcileNarrative(
 	next: DescriptionSource,
 	itemName: string
 ): string {
-	const identities = (Object.keys(METADATA_LABELS) as IdentityField[])
-		.map((field) => ({
-			field,
-			original: (source[field] ?? '').trim(),
-			replacement: (next[field] ?? '').trim(),
-		}))
-		.filter(({ original }) => original.length > 0);
+	const identities = IDENTITY_FIELDS.map((field) => ({
+		field,
+		original: (source[field] ?? '').trim(),
+		replacement: (next[field] ?? '').trim(),
+	})).filter(({ original }) => original.length > 0);
 	if (!identities.length) return narrative;
 	const pattern = identifierPattern(
 		...identities.map(({ original }) => original).sort((a, b) => b.length - a.length)
@@ -212,20 +215,26 @@ export function reconcileDescriptionMetadata(
 	if (Object.hasOwn(updates, 'description') && updates.description !== current.description) {
 		return current.descriptionSource ? { ...updates, descriptionSource: undefined } : updates;
 	}
-	if (
-		!Object.keys(updates).some(
-			(key) => key === 'custom_fields' || Object.hasOwn(METADATA_LABELS, key)
-		)
-	)
-		return updates;
+	const next = { ...current, ...updates };
+	const customChanged =
+		next.custom_fields !== current.custom_fields &&
+		Object.keys({ ...current.custom_fields, ...next.custom_fields }).some(
+			(key) => current.custom_fields?.[key] !== next.custom_fields?.[key]
+		);
+	if (!customChanged && !IDENTITY_FIELDS.some((field) => current[field] !== next[field])) {
+		return Object.hasOwn(updates, 'descriptionSource')
+			? { ...updates, descriptionSource: current.descriptionSource }
+			: updates;
+	}
 	const source = current.descriptionSource ?? {
+		name: current.name,
 		description: current.description,
 		manufacturer: current.manufacturer,
 		model_number: current.model_number,
 		serial_number: current.serial_number,
 		custom_fields: current.custom_fields ? { ...current.custom_fields } : current.custom_fields,
 	};
-	const next = { ...current, ...updates };
+	const sourceName = source.name ?? current.name;
 	const description = source.description ?? '';
 	const protectedLabels = [
 		...Object.values(METADATA_LABELS),
@@ -234,14 +243,14 @@ export function reconcileDescriptionMetadata(
 	];
 	const boundary = narrativeBoundary(description, protectedLabels);
 	const parts = {
-		narrative: reconcileNarrative(description.slice(0, boundary), source, next, next.name),
+		narrative: reconcileNarrative(description.slice(0, boundary), source, next, sourceName),
 		metadata: description.slice(boundary),
 	};
 	let changed = false;
 	for (const [field, label] of Object.entries(METADATA_LABELS)) {
 		const key = field as keyof typeof METADATA_LABELS;
 		if (next[key] === source[key]) continue;
-		changeIdentifier(parts, label, source[key], next[key], { field: key, name: next.name });
+		changeIdentifier(parts, label, source[key], next[key], { field: key, name: sourceName });
 		changed = true;
 	}
 	if (source.custom_fields || next.custom_fields) {

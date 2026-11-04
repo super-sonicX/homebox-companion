@@ -32,6 +32,8 @@ INVENTORY_DESCRIPTION_GUIDANCE = (
 
 
 # The review editor uses these same cues when correcting prose.
+# Unicode Space_Separator (Zs) plus tab, deliberately excluding line separators.
+HORIZONTAL_SPACING = re.compile(r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+")
 NARRATIVE_FIELD_CUES = {
     "Manufacturer": re.compile(r"\b(?:manufacturer|brand(?: name)?|made by|manufactured by)[ \t]*[#:=]?[ \t]*\Z", re.I),
     "Part/model number": re.compile(
@@ -49,7 +51,7 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     headings = re.compile(rf"{CLAUSE_START}({alternatives})[ \t]*:", re.IGNORECASE)
     for match in headings.finditer(text):
         heading = match[1].strip().casefold()
-        cue = heading.rsplit(",", 1)[-1].strip()
+        cue = HORIZONTAL_SPACING.sub(" ", heading.rsplit(",", 1)[-1].strip())
         if heading in protected or not any(pattern.fullmatch(cue) for pattern in NARRATIVE_FIELD_CUES.values()):
             return text[: match.start()]
     return text
@@ -60,7 +62,7 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
     token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
     distinctive = not value.isdecimal() and len(value) >= (2 if label == "Manufacturer" else 3)
     for match in token.finditer(narrative):
-        before = narrative[: match.start()]
+        before = HORIZONTAL_SPACING.sub(" ", narrative[: match.start()])
         cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
         if cue == label or (cue is None and distinctive):
             return True

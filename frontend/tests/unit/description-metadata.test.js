@@ -493,3 +493,36 @@ test('colon-bearing model and serial cues are editable before protected authored
 		'Previous model: ABC-123. Part/model number: DEF-456.'
 	);
 });
+
+test('a photo or an unrelated field edit after renaming cannot restore the original numeric model', () => {
+	let item = current({
+		name: 'Relay',
+		description: 'A 123 relay.',
+		model_number: '123',
+		custom_fields: { Colour: 'red' },
+	});
+	item = { ...item, ...reconcileDescriptionMetadata(item, { model_number: '456' }) };
+	item = { ...item, ...reconcileDescriptionMetadata(item, { name: 'Pump' }) };
+	const photo = reconcileDescriptionMetadata(item, {
+		...item,
+		custom_fields: { ...item.custom_fields },
+		customThumbnail: 'photo',
+	});
+	assert.equal(photo.description, 'A 456 relay.');
+	assert.equal(photo.descriptionSource, item.descriptionSource);
+	assert.equal(
+		reconcileDescriptionMetadata({ ...item, ...photo }, { manufacturer: 'Maker' }).description,
+		'A 456 relay. Manufacturer: Maker.'
+	);
+});
+
+test('nonbreaking and other horizontal spaces preserve field ownership and the authored spacing', () => {
+	for (const gap of ['\u00a0', '\u202f', '\u3000', '\t']) {
+		const text = 'Device, serial' + gap + 'number:' + gap + 'ABC-123.';
+		const item = current({ description: text, model_number: 'ABC-123', serial_number: 'ABC-123' });
+		assert.equal(
+			reconcileDescriptionMetadata(item, { model_number: 'DEF-456' }).description,
+			text + ' Part/model number: DEF-456.'
+		);
+	}
+});

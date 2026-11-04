@@ -116,6 +116,7 @@ export interface ThumbnailTransform {
 /** The authored description and structured values before automatic review-form edits. */
 export type DescriptionSource = Pick<ItemCore, 'description'> &
 	Pick<ItemExtended, 'manufacturer' | 'model_number' | 'serial_number'> & {
+		name?: string;
 		custom_fields?: Record<string, string> | null;
 	};
 
