@@ -8,7 +8,7 @@ Duelion/homebox-companion upstream remains a fetch-only integration source.
 upstream's unmodified image over the local customisations. The upstream review
 process and upstream PRs are separate from this private deployment decision.
 
-**Review scope:** follow the [upstream-compatible review triage policy](review-triage-upstream.md). Fix regressions we introduce, defects blocking required fork integrations, and verified high/critical issues even if upstream; normally defer unrelated not high/critical upstream defects instead of creating unnecessary fork divergence. Every finding requires an explicit decision and rationale before merge.
+**Review scope:** follow the [upstream-compatible review triage policy](review-triage-upstream.md). Fix regressions we introduce, defects blocking required fork integrations, and verified high/critical issues even if upstream; normally defer unrelated upstream defects assessed as not high/critical instead of creating unnecessary fork divergence. Every finding requires an explicit decision and rationale before merge.
 
 ## Fork-specific features to preserve
 
@@ -62,7 +62,7 @@ process and upstream PRs are separate from this private deployment decision.
    Triage every CodeRabbit and other review finding using the
    [upstream-compatible review policy](review-triage-upstream.md). Fix confirmed
    fork regressions, required integration defects and high/critical risks.
-   Document evidence-based deferral of unrelated not high/critical upstream defects
+   Document evidence-based deferral of unrelated upstream defects assessed as not high/critical
    and provide technical rationales for false positives. Rerun affected tests,
    complete CodeRabbit re-review as appropriate, and merge only after all
    findings have a documented disposition and required fixes are complete.

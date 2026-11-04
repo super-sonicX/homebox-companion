@@ -28,7 +28,7 @@ Keep this fork as close as practical to the original author's `Duelion/homebox-c
 3. **Record a decision:** in the PR conversation, mark each issue **fix / minimal compatibility fix / upstream-deferred / false positive / future enhancement**, together with evidence and a brief rationale. Link upstream issues when appropriate.
 4. **Keep fixes surgical:** use small, well-contained patches, wrappers, configuration or modules rather than broad rewrites of upstream files. Avoid unnecessary dependency changes and formatting-only churn in unrelated modules.
 5. **Validate compatibility:** add regression coverage for changed functionality, run relevant tests and type/lint checks, and test interaction with upstream interfaces. Re-run CodeRabbit after substantive fixes and address new actionable findings.
-6. **Merge gate:** do not merge with unresolved confirmed fork-introduced bugs, required integration failures or verified high/critical risks. A documented unrelated not high/critical upstream defect is not a fork merge blocker when responsibly triaged and deferred.
+6. **Merge gate:** do not merge with unresolved confirmed fork-introduced bugs, required integration failures or verified high/critical risks. A documented unrelated upstream defect assessed as not high/critical is not a fork merge blocker when responsibly triaged and deferred.
 7. **Deploy only reviewed and merged commits**, with a rollback path and post-deployment verification. Document any emergency mitigation separately and bring its code through a reviewed PR.
 
 ## Maintaining compatibility with future upstream releases
