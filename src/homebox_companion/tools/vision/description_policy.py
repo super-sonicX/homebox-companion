@@ -102,7 +102,8 @@ def aggregate_description(
         if not value:
             continue
         own_clause = re.compile(
-            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}(?=[.;!?](?:\s|$)|[ \t]*(?:\r?\n|$))",
+            rf"{CLAUSE_START}{re.escape(label)}[ \t]*:[ \t]*{re.escape(value)}"
+            r"(?=[.;!?](?:\s|$)|[ \t]*(?:[([]|\r?\n|$))",
             re.IGNORECASE,
         )
         token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
@@ -164,27 +165,20 @@ def remove_superseded_generated_identifiers(
         ) -> str:
             """Remove just the matched value and delimiter, leaving later sentences untouched."""
             value = match["value"].strip()
-            if value and value.casefold() == desired.casefold():
+            # A parenthetical annotation belongs to the author. Retain it even if
+            # the structured field changes; aggregation can add the new value separately.
+            qualified = any(
+                identity and re.match(rf"{re.escape(identity)}[ \t]*[([]", value, re.IGNORECASE)
+                for identity in (desired, previous)
+            )
+            if value and (value.casefold() == desired.casefold() or qualified):
                 return match[0]
-            tail = match.string[match.end() :]
-            same_line = tail.partition("\n")[0].strip()
-            if value and value.casefold() != previous.casefold():
-                last_word = value.split()[-1]
-                ambiguous_name = (
-                    field == "manufacturer"
-                    and match["end"] == "."
-                    and same_line
-                    and (
-                        len(last_word) == 1
-                        or last_word.casefold()
-                        in {"inc", "ltd", "co", "corp", "st", "dr", "mr", "mrs", "ms", "prof", "rev"}
-                    )
+            if value and (not previous or value.casefold() != previous.casefold()):
+                raise ValueError(
+                    f"Cannot safely separate the previous {field} from the description. "
+                    "Correct the labelled text or supply the matching previous_identifiers value."
                 )
-                if previous or ambiguous_name or not match["end"]:
-                    raise ValueError(
-                        f"Cannot safely separate the previous {field} from the description. "
-                        "Correct the labelled text or supply the matching previous_identifiers value."
-                    )
+            same_line = match.string[match.end() :].partition("\n")[0].strip()
             return match["leading"] if "\n" in match["leading"] and same_line else ""
 
         text = clause.sub(replace_stale, text)

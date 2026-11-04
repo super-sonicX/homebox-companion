@@ -20,7 +20,7 @@ Homebox list/search responses contain item name and description but do **not** i
 - The validated AI output repeats explicit Manufacturer, Model Number and Serial Number in Description if not already present (idempotently).
 - Detection/analysis responses also repeat populated custom fields that represent identifiers or useful technical specifications (part numbers, MPNs, SKUs, voltage, current, power ratings, dimensions, capacity and compatibility).
 - The **create-item endpoint** re-aggregates the final values after any edits made in the Companion UI, so changing Manufacturer/Model Number does not leave the Description behind.
-- The review form retains the original structured identifiers. If an API client corrects a dotted name in an older description, it can provide the old value in the optional `previous_identifiers` object. Companion returns a per-item validation error when it cannot distinguish a name from a following sentence safely. The original identifiers are used only by Companion.
+- The review form retains the original structured identifiers. To remove or replace an existing labelled value, an API client can provide the exact old value in the optional `previous_identifiers` object. Companion returns a per-item validation error when it cannot distinguish a name from a following sentence safely. The original identifiers are used only by Companion.
 - A description exceeding Homebox's 1,000-character maximum after aggregation fails rather than silently truncating an identifier.
 
 ## Example

@@ -336,3 +336,18 @@ test('a newly excluded currency value cannot leave the old technical rating behi
 		'Controller.'
 	);
 });
+
+test('correcting a currency-prefixed technical value replaces just its old labelled clause', () => {
+	const item = current({
+		description: 'Controller. Voltage: £24. Note: receipt says £24.',
+		custom_fields: { Voltage: '£24' },
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '24V' } }).description,
+		'Controller. Voltage: 24V. Note: receipt says £24.'
+	);
+	assert.equal(
+		reconcileDescriptionMetadata(item, { custom_fields: { Voltage: '€20' } }).description,
+		'Controller. Note: receipt says £24.'
+	);
+});

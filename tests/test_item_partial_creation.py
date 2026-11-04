@@ -187,6 +187,7 @@ async def test_create_removes_old_generated_identifiers_from_edited_fields(gatew
                 "name": "Peugeot brackets",
                 "description": "Peugeot bumper brackets. Manufacturer: WrongCo. Part/model number: OLD-123.",
                 "manufacturer": "RightCo",
+                "previous_identifiers": {"manufacturer": "WrongCo", "model_number": "OLD-123"},
                 "model_number": "NEW-456",
             }
         ],
@@ -206,6 +207,7 @@ async def test_create_removes_old_generated_model_when_explicitly_cleared(gatewa
                 "name": "Peugeot brackets",
                 "description": "Peugeot bumper brackets. Part/model number: OLD-123.",
                 "model_number": None,
+                "previous_identifiers": {"model_number": "OLD-123"},
             }
         ],
     )
@@ -270,7 +272,14 @@ async def test_create_never_drops_user_safety_notes_after_generated_metadata(gat
 async def test_single_character_identifier_correction_preserves_short_warnings(gateway, field, label):
     response = await submit(
         gateway,
-        [{"name": "Relay", "description": f"Relay. {label}: X. Flammable. Keep away from heat.", field: "Y"}],
+        [
+            {
+                "name": "Relay",
+                "description": f"Relay. {label}: X. Flammable. Keep away from heat.",
+                field: "Y",
+                "previous_identifiers": {field: "X"},
+            }
+        ],
     )
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == f"Relay. Flammable. Keep away from heat. {label}: Y."
@@ -320,3 +329,25 @@ async def test_create_keeps_an_unpunctuated_manufacturer_at_the_description_limi
     response = await submit(gateway, [{"name": "Relay", "description": description, "manufacturer": "Acme"}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == description
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("desired", ["Acme", "NewCo"])
+async def test_authored_recall_warning_in_a_manufacturer_clause_is_never_removed(gateway, desired):
+    description = "Relay. Manufacturer: Acme (recalled; do not energize)."
+    item = {"name": "Relay", "description": description, "manufacturer": desired}
+    if desired != "Acme":
+        item["previous_identifiers"] = {"manufacturer": "Acme"}
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = description if desired == "Acme" else f"{description} Manufacturer: NewCo."
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_unverified_labelled_content_is_not_deleted_or_written(gateway):
+    response = await submit(
+        gateway, [{"name": "Relay", "description": "Relay. Serial number: Check before use.", "serial_number": None}]
+    )
+    assert "Cannot safely separate" in response.json()["errors"][0]
+    gateway.create_item.assert_not_awaited()

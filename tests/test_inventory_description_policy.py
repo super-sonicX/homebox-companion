@@ -133,6 +133,7 @@ def test_save_reconciles_superseded_canonical_metadata_without_erasing_prose():
         raw,
         manufacturer="RightCo",
         model_number="NEW-456",
+        previous_identifiers={"manufacturer": "WrongCo", "model_number": "OLD-123"},
         explicitly_updated=frozenset({"manufacturer", "model_number"}),
     )
     assert cleaned == "Bumper mounting brackets."
@@ -147,6 +148,7 @@ def test_explicit_clearing_removes_generated_serial_but_not_unrelated_text():
     cleaned = remove_superseded_generated_identifiers(
         "Important technical note. Serial number: BAD-SN-001.",
         serial_number=None,
+        previous_identifiers={"serial_number": "BAD-SN-001"},
         explicitly_updated=frozenset({"serial_number"}),
     )
     assert cleaned == "Important technical note."
@@ -214,7 +216,10 @@ def test_save_preserves_user_paragraph_breaks_when_reconciling_metadata():
 
     original = "First paragraph. Manufacturer: WrongCo.\n\nSecond paragraph is important."
     cleaned = remove_superseded_generated_identifiers(
-        original, manufacturer="RightCo", explicitly_updated=frozenset({"manufacturer"})
+        original,
+        manufacturer="RightCo",
+        previous_identifiers={"manufacturer": "WrongCo"},
+        explicitly_updated=frozenset({"manufacturer"}),
     )
     assert "\n\nSecond paragraph" in cleaned
     assert "WrongCo" not in cleaned
@@ -321,7 +326,10 @@ def test_superseded_identifiers_preserve_following_user_sentences():
     )
     for replacement in ("NewCo", None):
         cleaned = remove_superseded_generated_identifiers(
-            raw, manufacturer=replacement, explicitly_updated=frozenset({"manufacturer"})
+            raw,
+            manufacturer=replacement,
+            previous_identifiers={"manufacturer": "Acme"},
+            explicitly_updated=frozenset({"manufacturer"}),
         )
         assert "Keep disconnected until installed." in cleaned
         assert "Manufacturer: Acme" not in cleaned

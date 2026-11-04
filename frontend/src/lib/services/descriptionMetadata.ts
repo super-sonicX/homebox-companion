@@ -227,10 +227,9 @@ export function reconcileDescriptionMetadata(
 			if (FINANCIAL_NAME_PATTERN.test(key)) continue;
 			const oldValue = oldFields[key]?.trim() ?? '';
 			const newValue = newFields[key]?.trim() ?? '';
-			const previous = /^[£$€]/.test(oldValue) ? '' : oldValue;
 			const replacement = /^[£$€]/.test(newValue) ? '' : newValue;
-			if (previous === replacement) continue;
-			changeIdentifier(parts, key, previous, replacement);
+			if (oldValue === newValue || (!oldValue && !replacement)) continue;
+			changeIdentifier(parts, key, oldValue, replacement);
 			changed = true;
 		}
 	}
