@@ -8,6 +8,8 @@ Duelion/homebox-companion upstream remains a fetch-only integration source.
 upstream's unmodified image over the local customisations. The upstream review
 process and upstream PRs are separate from this private deployment decision.
 
+**Review scope:** follow the [upstream-compatible review triage policy](review-triage-upstream.md). Fix regressions we introduce, defects blocking required fork integrations, and verified high/critical issues even if upstream; normally defer unrelated, pre-existing upstream defects assessed as not high/critical **only when a comparison against earlier upstream code demonstrates that the issue predates this PR**. Record that evidence and the disposition to avoid unnecessary fork divergence. Every finding requires an explicit decision and rationale before merge.
+
 ## Fork-specific features to preserve
 
 - Library inventory browsing, 40-item pagination, Compact/Standard/Medium/Large
@@ -57,9 +59,15 @@ process and upstream PRs are separate from this private deployment decision.
    tests against real inventory.
 
 4. Open a PR from the update branch to super-sonicX/homebox-companion main.
-   Address CodeRabbit and other review findings, including any compatibility
-   regressions, and rerun affected tests. Explicitly justify false positives
-   rather than removing supported features. Merge only after validation.
+   Triage every CodeRabbit and other review finding using the
+   [upstream-compatible review policy](review-triage-upstream.md). Fix confirmed
+   fork regressions, required integration defects and high/critical risks.
+   Document evidence-based deferral of unrelated, pre-existing upstream defects assessed as not high/critical
+   and provide technical rationales for false positives. Rerun affected tests
+   after fixes, request CodeRabbit re-review after every new PR commit, and
+   merge only when the **final PR head** has a completed review, all findings
+   have provenance- and impact-supported dispositions, and all blocking fixes
+   are complete.
 5. Build a versioned image from the merged fork source. Use a clean Git
    archive from main, not a copied upstream Docker image plus undocumented
    application overlays. A possible host build sequence is:
