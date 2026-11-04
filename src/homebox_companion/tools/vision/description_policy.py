@@ -10,6 +10,10 @@ from __future__ import annotations
 import re
 
 MAX_DESCRIPTION_LENGTH = 1000
+DESCRIPTION_OVERFLOW = (
+    "Description plus identifiers exceeds 1000 characters. "
+    "Shorten the narrative without dropping manufacturer or part details."
+)
 # One Unicode space separator (Zs) or tab, excluding line breaks.
 HSPACE = r"[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
 # Generated headings start a sentence or a line. Commas separate prose cues and notes, not generated headings.
@@ -54,12 +58,14 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     """Separate narrative identity cues from named fields and authored notes."""
     if ":" not in text:
         return text
-    labels = [*NARRATIVE_FIELD_CUES, *(custom_fields or {})]
-    names = "|".join(re.escape(label.strip()) for label in labels if label.strip())
-    # Match known literal headings separately: the generic scan must never backtrack over whitespace.
-    known = re.search(rf"{CLAUSE_START}(?:{names}){HSPACE}*:", text, re.IGNORECASE)
-    if known:
-        text = text[: known.start()]
+    protected = {label.casefold() for label in NARRATIVE_FIELD_CUES}
+    protected.update(label.strip().casefold() for label in custom_fields or {} if len(label) <= len(text))
+    # Look up only literal headings found in the bounded description, without compiling caller-provided keys.
+    for leading in re.finditer(CLAUSE_START, text):
+        colon = text.find(":", leading.end())
+        if colon >= 0 and text[leading.end() : colon].strip().casefold() in protected:
+            text = text[: leading.start()]
+            break
     start = 0
     for mark in HEADING_MARKS.finditer(text):
         if mark[0] == ":":
@@ -73,6 +79,19 @@ def _narrative_prefix(text: str, custom_fields: dict[str, str] | None) -> str:
     return text
 
 
+SENTENCE_END = re.compile(r"[;!?\r\n\u2028\u2029]|\.(?=\s|$)")
+ABBREVIATION = re.compile(r"\b(?:[a-z]|approx|no|nos|ref|rev|fig|inc|ltd|corp|co|dr|st|mr|mrs|ms|dia)\Z", re.I)
+
+
+def _sentence_prefix(before: str) -> str:
+    """Locate the current sentence without splitting decimal measurements, dotted names or abbreviations."""
+    start = 0
+    for end in SENTENCE_END.finditer(before):
+        if end[0] != "." or not ABBREVIATION.search(before[start : end.start()]):
+            start = end.end()
+    return before[start:]
+
+
 def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
     """Prefer the field named in the prose when an identifier could describe multiple fields."""
     token = re.compile(rf"(?<![\w./-]){re.escape(value)}(?![\w-]|[./]\w)", re.IGNORECASE)
@@ -80,7 +99,7 @@ def _narrative_has_identifier(narrative: str, value: str, label: str) -> bool:
     for match in token.finditer(narrative):
         before = HORIZONTAL_SPACING.sub(" ", narrative[: match.start()])
         cue = next((field for field, pattern in NARRATIVE_FIELD_CUES.items() if pattern.search(before)), None)
-        sentence = re.split(r"[.;!?\r\n\u2028\u2029]", before)[-1]
+        sentence = _sentence_prefix(before)
         if COMPATIBILITY_REFERENCE.search(sentence):
             _, comma, field_prefix = sentence.rpartition(",")
             if not (comma and cue and NARRATIVE_FIELD_CUES[cue].fullmatch(field_prefix.strip())):
@@ -105,6 +124,8 @@ def aggregate_description(
     Never truncate or discard a part number: overflow is raised to the caller.
     """
     result = (description or "").strip()
+    if len(result) > MAX_DESCRIPTION_LENGTH:
+        raise ValueError(DESCRIPTION_OVERFLOW)
     narrative = _narrative_prefix(result, custom_fields)
     # Custom technical specifications require field-specific deduplication.
     # A "12" that appears in Voltage must not suppress Current: 12.
@@ -158,6 +179,10 @@ def aggregate_description(
         # "12V", or "ABC-123" in "ABC-1234" for an exact match.
         if not value:
             continue
+        if len(value) > MAX_DESCRIPTION_LENGTH or (
+            require_label and len(label) + 1 + len(value) > MAX_DESCRIPTION_LENGTH
+        ):
+            raise ValueError(DESCRIPTION_OVERFLOW)
         own_clause = re.compile(
             rf"{CLAUSE_START}{re.escape(label)}{HSPACE}*:{HSPACE}*{re.escape(value)}"
             rf"(?:(?<=[.;!?])(?=\s|$)|(?=[,.;!?](?:\s|$)|{HSPACE}*(?:[([]|\r?\n|$)))",
@@ -170,11 +195,8 @@ def aggregate_description(
             result += "."
         result = f"{result} {phrase}".strip()
 
-    if len(result) > MAX_DESCRIPTION_LENGTH:
-        raise ValueError(
-            "Description plus identifiers exceeds 1000 characters. "
-            "Shorten the narrative without dropping manufacturer or part details."
-        )
+        if len(result) > MAX_DESCRIPTION_LENGTH:
+            raise ValueError(DESCRIPTION_OVERFLOW)
     return result
 
 
@@ -196,6 +218,8 @@ def remove_superseded_generated_identifiers(
     Fields omitted by external clients are deliberately not interpreted as
     a request to erase existing narrative content.
     """
+    if any(value and len(value) > 255 for value in (previous_identifiers or {}).values()):
+        raise ValueError("Previous identifiers must be at most 255 characters.")
     text = (description or "").strip()
     fields = {
         "manufacturer": ("Manufacturer", manufacturer),

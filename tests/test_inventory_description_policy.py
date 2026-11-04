@@ -556,3 +556,9 @@ def test_maximum_length_whitespace_runs_remain_unchanged(tail):
 def test_a_manufacturer_named_after_a_compatibility_clause_is_still_recognized():
     text = "Compatible with Acme appliances, manufactured by NewCo."
     assert aggregate_description(text, manufacturer="NewCo") == text
+
+
+@pytest.mark.parametrize("detail", ["3.5 mm", "approx. 3.5 mm", "rev. 2", "e.g.", "St. Jude"])
+def test_a_decimal_or_abbreviation_does_not_end_a_compatibility_statement(detail):
+    text = f"Fits {detail} Acme sockets."
+    assert aggregate_description(text, manufacturer="Acme") == f"{text} Manufacturer: Acme."

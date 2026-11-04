@@ -34,13 +34,18 @@ const HISTORICAL_HEADING =
 /** Keep user-written headings and the notes after them out of narrative replacement. */
 function narrativeBoundary(text: string, labels: readonly string[]): number {
 	if (!text.includes(':')) return text.length;
-	const names = labels
-		.map((label) => label.trim())
-		.filter(Boolean)
-		.map(escapeRegex)
-		.join('|');
-	const known = new RegExp(`${CLAUSE_START}(?:${names})${HSPACE}*:`, 'iu').exec(text);
-	const end = known?.index ?? text.length;
+	const protectedNames = new Set(
+		labels.filter((label) => label.length <= text.length).map((label) => label.trim().toLowerCase())
+	);
+	let end = text.length;
+	for (const leading of text.matchAll(new RegExp(CLAUSE_START, 'gu'))) {
+		const offset = leading.index + leading[0].length;
+		const colon = text.indexOf(':', offset);
+		if (colon >= 0 && protectedNames.has(text.slice(offset, colon).trim().toLowerCase())) {
+			end = leading.index;
+			break;
+		}
+	}
 	let start = 0;
 	for (const mark of text.slice(0, end).matchAll(HEADING_MARKS)) {
 		if (mark[0] === ':') {
@@ -163,6 +168,18 @@ const IDENTITY_CUES: ReadonlyArray<{ field: IdentityField; pattern: RegExp }> = 
 	},
 ];
 
+const SENTENCE_END = /[;!?\r\n\u2028\u2029]|\.(?=\s|$)/gu;
+const ABBREVIATION = /\b(?:[a-z]|approx|no|nos|ref|rev|fig|inc|ltd|corp|co|dr|st|mr|mrs|ms|dia)$/iu;
+
+function sentencePrefix(before: string): string {
+	let start = 0;
+	for (const end of before.matchAll(SENTENCE_END)) {
+		if (end[0] !== '.' || !ABBREVIATION.test(before.slice(start, end.index)))
+			start = end.index + end[0].length;
+	}
+	return before.slice(start);
+}
+
 /** Disambiguate short identities and numbers using their field cue or a leading product designation. */
 function narrativeIdentityMatches(
 	text: string,
@@ -173,7 +190,7 @@ function narrativeIdentityMatches(
 ): boolean {
 	const before = text.slice(0, offset).replace(HORIZONTAL_SPACING, ' ');
 	const cue = IDENTITY_CUES.find(({ pattern }) => pattern.test(before));
-	const sentence = before.split(/[.;!?\r\n\u2028\u2029]/u).at(-1) ?? '';
+	const sentence = sentencePrefix(before);
 	if (COMPATIBILITY_REFERENCE.test(sentence)) {
 		const comma = sentence.lastIndexOf(',');
 		const fieldPrefix = sentence.slice(comma + 1).trim();

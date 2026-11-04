@@ -442,3 +442,23 @@ async def test_create_does_not_use_compatibility_as_the_current_manufacturer(gat
     response = await submit(gateway, [{"name": "Adapter", "description": text, "manufacturer": "Acme"}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].description == f"{text} Manufacturer: Acme."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["manufacturer", "model_number", "serial_number"])
+async def test_oversized_previous_identifier_fails_only_its_item_before_a_write(gateway, field):
+    item = {"name": "Invalid", "description": "Relay.", field: "New", "previous_identifiers": {field: "X" * 65536}}
+    response = await submit(gateway, [item, {"name": "Valid"}])
+    assert response.status_code == 207
+    assert "255 characters" in response.json()["errors"][0]
+    gateway.create_item.assert_awaited_once()
+    assert gateway.create_item.call_args.args[0].name == "Valid"
+
+
+@pytest.mark.asyncio
+async def test_oversized_technical_value_is_rejected_before_aggregating(gateway):
+    item = {"name": "Relay", "description": "Relay.", "custom_fields": {"Voltage": "V" * 65536}}
+    response = await submit(gateway, [item])
+    assert response.status_code == 207
+    assert "1000 characters" in response.json()["errors"][0]
+    gateway.create_item.assert_not_awaited()

@@ -592,3 +592,17 @@ test('Unicode spacing before a note remains intact after an identity correction'
 		);
 	}
 });
+
+test('decimal sizes and abbreviations do not end a compatibility statement', () => {
+	for (const detail of ['3.5 mm', 'approx. 3.5 mm', 'rev. 2', 'e.g.', 'St. Jude']) {
+		const fit = 'Fits ' + detail + ' Acme sockets.';
+		const item = current({
+			description: 'Acme adapter. ' + fit + ' Acme cable included.',
+			manufacturer: 'Acme',
+		});
+		assert.equal(
+			reconcileDescriptionMetadata(item, { manufacturer: 'NewCo' }).description,
+			'NewCo adapter. ' + fit + ' NewCo cable included.'
+		);
+	}
+});

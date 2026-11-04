@@ -129,14 +129,7 @@ async def create_items(
             detected_item = DetectedItem(
                 name=item_input.name,
                 quantity=item_input.quantity,
-                description=remove_superseded_generated_identifiers(
-                    item_input.description,
-                    manufacturer=item_input.manufacturer,
-                    model_number=item_input.model_number,
-                    serial_number=item_input.serial_number,
-                    explicitly_updated=frozenset(item_input.model_fields_set),
-                    previous_identifiers=item_input.previous_identifiers,
-                ),
+                description=item_input.description,
                 parent_id=parent_id,
                 tag_ids=validated_tag_ids if validated_tag_ids else None,
                 manufacturer=item_input.manufacturer,
@@ -149,8 +142,16 @@ async def create_items(
 
             # A user may edit the detected fields independently before saving.
             # Reconcile the final submitted values, not just the original AI output.
-            item_description = aggregate_description(
+            reconciled = remove_superseded_generated_identifiers(
                 detected_item.description,
+                manufacturer=detected_item.manufacturer,
+                model_number=detected_item.model_number,
+                serial_number=detected_item.serial_number,
+                explicitly_updated=frozenset(item_input.model_fields_set),
+                previous_identifiers=item_input.previous_identifiers,
+            )
+            item_description = aggregate_description(
+                reconciled,
                 manufacturer=detected_item.manufacturer,
                 model_number=detected_item.model_number,
                 serial_number=detected_item.serial_number,
