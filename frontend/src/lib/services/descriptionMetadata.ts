@@ -218,13 +218,12 @@ function narrativeIdentityMatches(
 			return false;
 	}
 	if (cue) return cue.field === field;
+	// Unlabelled prose is editable only at its leading product designation.
+	// Values resembling measurements need an explicit identity cue.
+	const leading = /^(?:(?:an?|the)\s+)?$/iu.test(sentence.trimStart());
+	if (!leading || /^\d+(?:[.,]\d+)?\s*[\p{L}%]+$/u.test(value)) return false;
 	if (/[\p{L}_/-]/u.test(value) && value.length >= (field === 'manufacturer' ? 2 : 3)) return true;
-	if (
-		field !== 'model_number' ||
-		value.length < 3 ||
-		!/^(?:(?:an?|the)\s+)?$/iu.test(before.trimStart())
-	)
-		return false;
+	if (field !== 'model_number' || value.length < 3) return false;
 	const following = text.slice(offset + value.length).trimStart();
 	const product = name.trim().replace(/^(?:an?|the)\s+/iu, '');
 	// Only infer a designation from a product name or an explicit electronics part type.

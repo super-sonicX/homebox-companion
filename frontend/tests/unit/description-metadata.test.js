@@ -698,3 +698,30 @@ test('an explicit maker after a fitment target is independent of punctuation', (
 		);
 	}
 });
+
+test('identity edits preserve uncued measurements and ordinary words', () => {
+	const supply = current({
+		description: '12V DC power supply, model 12V.',
+		model_number: '12V',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(supply, { model_number: 'LRS-100-12' }).description,
+		'12V DC power supply, model LRS-100-12.'
+	);
+	const controller = current({
+		description: 'Controller with power switched on.',
+		manufacturer: 'ON',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(controller, { manufacturer: 'ST' }).description,
+		'Controller with power switched on. Manufacturer: ST.'
+	);
+	const replacement = current({
+		description: '24V DC power supply, model 12V.',
+		model_number: '12V',
+	});
+	assert.equal(
+		reconcileDescriptionMetadata(replacement, { model_number: '24V' }).description,
+		'24V DC power supply, model 24V.'
+	);
+});
