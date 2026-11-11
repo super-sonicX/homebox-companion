@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "homebox-companion"
-version = "3.2.0"
+version = "3.2.2"
 description = "AI-powered companion app for Homebox - detect and catalog household items from photos"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
@@ -22,7 +22,8 @@ classifiers = [
     "Topic :: Home Automation",
 ]
 dependencies = [
-    "litellm>=1.72.0",
+    # MCP extra supplies the dependencies LiteLLM currently imports for chat tools (#199).
+    "litellm[mcp]==1.108.1",
     "httpx>=0.27.0",
     "aiohttp>=3.11.0",
     "fastapi>=0.115.0",
