@@ -27,7 +27,7 @@ def test_aggregates_manufacturer_and_part_number_without_sacrificing_structured_
     assert item.model_number == "PG4301005"
     assert "Peugeot" in item.description
     # The Pydantic transport model must not aggregate identifiers before the
-    # API can convert overflows into an actionable validation response.
+    # API can preserve overflowing items for editing before creation.
     assert item.description == "Peugeot 308 front bumper mounting brackets for both sides."
     display = aggregate_description(item.description, manufacturer=item.manufacturer, model_number=item.model_number)
     assert "Part/model number: PG4301005." in display
@@ -110,18 +110,11 @@ def test_financial_reference_price_is_excluded_from_description():
     assert "INV-99" not in result
 
 
-def test_vision_response_returns_422_instead_of_500_for_overflow():
-    from fastapi import HTTPException
+def test_vision_response_keeps_original_text_for_overflow():
+    from server.api.tools.vision import aggregate_description_for_review
 
-    from server.api.tools.vision import aggregate_description_or_422
-
-    with pytest.raises(HTTPException) as error:
-        aggregate_description_or_422(
-            "A" * 994,
-            custom_fields={"Supplier Part Number": "PG4301005"},
-        )
-    assert error.value.status_code == 422
-    assert "1000 characters" in str(error.value.detail)
+    original = "A" * 994
+    assert aggregate_description_for_review(original, custom_fields={"Supplier Part Number": "PG4301005"}) == original
 
 
 def test_save_reconciles_superseded_canonical_metadata_without_erasing_prose():
@@ -171,9 +164,11 @@ def test_part_number_matches_sentence_period_but_not_version_suffix():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("overflow_source", ["custom", "manufacturer"])
-async def test_detection_returns_actionable_422_for_long_identifiers(monkeypatch, overflow_source):
-    """Actual HTTP path reports a guarded error, whether overflow is from AI metadata or a custom field."""
+@pytest.mark.parametrize("route", ["detect", "analyze", "correct"])
+async def test_vision_overflow_keeps_items_and_identifiers_available_for_review(monkeypatch, overflow_source, route):
+    """Exercise HTTP responses so one long item cannot discard its valid siblings."""
     import io
+    import json
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -182,6 +177,7 @@ async def test_detection_returns_actionable_422_for_long_identifiers(monkeypatch
     from PIL import Image
 
     from homebox_companion.core.config import Settings
+    from homebox_companion.tools.vision.models import get_items_adapter
     from server.api.tools import vision
     from server.dependencies import get_vision_context, require_llm_configured
 
@@ -192,23 +188,42 @@ async def test_detection_returns_actionable_422_for_long_identifiers(monkeypatch
         tags=[], field_preferences=None, output_language=None, custom_fields=[], default_tag_id=None
     )
     app.dependency_overrides[require_llm_configured] = lambda: "test-key"
-    from homebox_companion.tools.vision.models import get_items_adapter
-
     raw = {"name": "Bumper bracket", "description": "x" * 995}
     if overflow_source == "manufacturer":
         raw["manufacturer"] = "ExampleCo"
-    # This exercises the same Pydantic transport adapter used after LLM
-    # responses; its validation must succeed before the guarded API boundary.
-    detected = get_items_adapter(None).validate_python([raw])[0]
-    monkeypatch.setattr(vision, "detect_items_from_bytes", AsyncMock(return_value=[detected]))
+    detected = get_items_adapter(None).validate_python(
+        [raw, {"name": "Relay", "description": "Small relay.", "manufacturer": "GoodCo"}]
+    )
+    monkeypatch.setattr(vision, "detect_items_from_bytes", AsyncMock(return_value=detected))
+    monkeypatch.setattr(vision, "llm_correct_item", AsyncMock(return_value=detected))
+    monkeypatch.setattr(vision, "analyze_item_details_from_images", AsyncMock(return_value=detected[0]))
     custom = {"Supplier Part Number": "PG4301005"} if overflow_source == "custom" else None
-    monkeypatch.setattr(vision, "get_custom_fields_dict", lambda item, defs: custom)
+    monkeypatch.setattr(
+        vision, "get_custom_fields_dict", lambda item, defs: custom if item.name == "Bumper bracket" else None
+    )
     image = io.BytesIO()
     Image.new("RGB", (8, 8), "white").save(image, format="JPEG")
+    field = "images" if route == "analyze" else "image"
+    data = {
+        "item_name": raw["name"],
+        "current_item": json.dumps(raw),
+        "correction_instructions": "Check the identification",
+    }
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-        response = await client.post("/detect", files={"image": ("part.jpg", image.getvalue(), "image/jpeg")})
-    assert response.status_code == 422
-    assert "1000 characters" in response.json()["detail"]
+        response = await client.post(
+            f"/{route}", files={field: ("part.jpg", image.getvalue(), "image/jpeg")}, data=data
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    items = [payload] if route == "analyze" else payload["items"]
+    assert items[0]["description"] == raw["description"]
+    assert items[0]["manufacturer"] == raw.get("manufacturer")
+    assert items[0]["custom_fields"] == custom
+    if route != "analyze":
+        assert len(items) == 2
+        assert items[1]["description"] == "Small relay. Manufacturer: GoodCo."
+    if route == "detect":
+        assert payload["compressed_images"]
 
 
 def test_save_preserves_user_paragraph_breaks_when_reconciling_metadata():
@@ -294,23 +309,21 @@ def test_financial_vat_token_does_not_exclude_activation_voltage():
     assert "VAT-12" not in result
 
 
-def test_ai_validation_defers_overflow_to_guarded_response_boundary():
-    from fastapi import HTTPException
-
+def test_ai_validation_preserves_overflow_for_review():
     from homebox_companion.tools.vision.models import get_items_adapter
-    from server.api.tools.vision import aggregate_description_or_422
+    from server.api.tools.vision import aggregate_description_for_review
 
     raw = "A" * 992
     parsed = get_items_adapter(None).validate_python(
         [{"name": "Relay", "description": raw, "manufacturer": "ExampleCo", "modelNumber": "P-1"}]
     )[0]
     assert parsed.description == raw
-    with pytest.raises(HTTPException) as error:
-        aggregate_description_or_422(
+    assert (
+        aggregate_description_for_review(
             parsed.description, manufacturer=parsed.manufacturer, model_number=parsed.model_number
         )
-    assert error.value.status_code == 422
-    assert "1000 characters" in str(error.value.detail)
+        == raw
+    )
 
 
 def test_superseded_identifiers_preserve_following_user_sentences():
