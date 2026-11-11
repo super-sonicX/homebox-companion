@@ -172,7 +172,10 @@ def test_reviewed_photo_reaches_homebox(
                 item = response.json()
                 assert item["name"] == "Smoke desk lamp recovered"
                 assert item["quantity"] == 7
-                assert item["description"] == "Recovered description — verified"
+                assert item["description"] == (
+                    "Recovered description — verified. Manufacturer: Smoke Manufacturing. "
+                    "Part/model number: Smoke Model. Serial number: Smoke Serial."
+                )
                 assert item["manufacturer"] == "Smoke Manufacturing"
                 assert item["modelNumber"] == "Smoke Model"
                 assert item["serialNumber"] == "Smoke Serial"

@@ -1,6 +1,6 @@
 """Item-related request/response schemas."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -22,6 +22,8 @@ class ItemInput(BaseModel):
     location_id: str | None = None  # Location to place the item in
     tag_ids: list[str] | None = None
     parent_id: str | None = None  # Parent item to nest under; takes precedence (both map to parentId)
+    # Optional source values for exact reconciliation of dotted identifiers at the Companion boundary.
+    previous_identifiers: dict[Literal["manufacturer", "model_number", "serial_number"], str | None] | None = None
     # Advanced fields
     serial_number: str | None = None
     model_number: str | None = None

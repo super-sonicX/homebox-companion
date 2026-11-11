@@ -48,6 +48,7 @@ export interface StoredImage {
 /** Serializable version of ReviewItem */
 export interface StoredReviewItem extends ItemCore, ItemExtended {
 	reviewId?: string;
+	descriptionSource?: ReviewItem['descriptionSource'];
 	/** Ordered selected photos; absent on older sessions. Empty means explicitly removed. */
 	photos?: StoredPhoto[];
 	custom_fields?: Record<string, string> | null;
@@ -257,6 +258,7 @@ export async function serializeImage(img: CapturedImage): Promise<StoredImage> {
 export function serializeReviewItem(item: ReviewItem): StoredReviewItem {
 	return {
 		reviewId: item.reviewId,
+		descriptionSource: item.descriptionSource,
 		// ItemCore fields
 		name: item.name,
 		quantity: item.quantity,
@@ -373,6 +375,7 @@ export async function deserializeReviewItem(stored: StoredReviewItem): Promise<R
 
 	return {
 		reviewId: stored.reviewId,
+		descriptionSource: stored.descriptionSource,
 		// ItemCore fields
 		name: stored.name,
 		quantity: stored.quantity,

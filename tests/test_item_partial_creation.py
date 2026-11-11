@@ -132,3 +132,390 @@ async def test_trimmed_name_and_zero_price_are_accepted(gateway):
     response = await submit(gateway, [{"name": "  Lamp  ", "quantity": 1, "purchase_price": 0}])
     assert response.status_code == 200
     assert gateway.create_item.call_args.args[0].name == "Lamp"
+
+
+@pytest.mark.asyncio
+async def test_create_aggregates_edited_manufacturer_model_and_custom_part_number(gateway):
+    """The final editor values must be in Description, not only separate fields."""
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Front Bumper Bracket Set Peugeot 308",
+                "description": "Replacement front bumper mounting brackets for a Peugeot 308.",
+                "manufacturer": "Peugeot",
+                "model_number": "PG4301005",
+                "custom_fields": {"Supplier Part Number": "ABC-123"},
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Peugeot" in created.description
+    assert "PG4301005" in created.description
+    assert "ABC-123" in created.description
+    assert "packaging" not in created.description
+    assert gateway.update_item.await_args.args[1]["modelNumber"] == "PG4301005"
+    assert gateway.update_item.await_args.args[1]["manufacturer"] == "Peugeot"
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_duplicate_identifiers_already_in_description(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Molex Connector",
+                "description": "Molex connector, part 50-57-9503.",
+                "manufacturer": "Molex",
+                "model_number": "50-57-9503",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Molex connector, part 50-57-9503."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("manufacturer", "authored", "expected"),
+    [
+        ("Acme", "Manufacturer: Acme Corp.", "Manufacturer: Acme Corp. Manufacturer: Acme."),
+        (None, "Manufacturer: unknown.", "Manufacturer: unknown."),
+    ],
+)
+async def test_untouched_manufacturer_preserves_authored_text_while_clearing_model(
+    gateway, manufacturer, authored, expected
+):
+    item = {
+        "name": "Relay",
+        "description": f"{authored} Part/model number: OLD-123.",
+        "manufacturer": manufacturer,
+        "model_number": None,
+        "previous_identifiers": {"manufacturer": manufacturer, "model_number": "OLD-123"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_identifiers_from_edited_fields(gateway):
+    """Check the exact identity passed to Homebox after a user corrects the detection."""
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Manufacturer: WrongCo. Part/model number: OLD-123.",
+                "manufacturer": "RightCo",
+                "previous_identifiers": {"manufacturer": "WrongCo", "model_number": "OLD-123"},
+                "model_number": "NEW-456",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "RightCo" in created.description and "NEW-456" in created.description
+    assert "WrongCo" not in created.description and "OLD-123" not in created.description
+
+
+@pytest.mark.asyncio
+async def test_create_removes_old_generated_model_when_explicitly_cleared(gateway):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Peugeot brackets",
+                "description": "Peugeot bumper brackets. Part/model number: OLD-123.",
+                "model_number": None,
+                "previous_identifiers": {"model_number": "OLD-123"},
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert created.description == "Peugeot bumper brackets."
+
+
+@pytest.mark.asyncio
+async def test_create_dotted_manufacturer_does_not_leave_orphaned_suffix(gateway):
+    """Exercise the create endpoint so partial manufacturer names cannot reach Homebox."""
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": "Relay. Manufacturer: Acme Inc. Ltd. Part/model number: P-1.",
+                "previous_identifiers": {"manufacturer": "Acme Inc. Ltd"},
+                "manufacturer": "NewCo",
+                "model_number": "P-1",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Acme" not in created.description and "Ltd" not in created.description
+    assert "NewCo" in created.description and "Part/model number: P-1." in created.description
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manufacturer", ["Acme", "A. Smith", "A. O. Smith", "St. Jude", "Dr. Martens"])
+@pytest.mark.parametrize("submitted", ["unchanged", "corrected", "cleared"])
+async def test_create_never_drops_user_safety_notes_after_generated_metadata(gateway, manufacturer, submitted):
+    """Verify the entire saved text, including the user note and the absence of any orphaned surname."""
+    submitted_manufacturer = manufacturer if submitted == "unchanged" else "NewCo" if submitted == "corrected" else None
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed.",
+                "manufacturer": submitted_manufacturer,
+                **({"previous_identifiers": {"manufacturer": manufacturer}} if submitted != "unchanged" else {}),
+            }
+        ],
+    )
+    assert response.status_code == 200
+    created = gateway.create_item.call_args.args[0]
+    assert "Keep disconnected until installed." in created.description
+    if submitted == "corrected":
+        assert created.description == "Relay. Keep disconnected until installed. Manufacturer: NewCo."
+    elif submitted == "cleared":
+        assert created.description == "Relay. Keep disconnected until installed."
+    else:
+        assert created.description == f"Relay. Manufacturer: {manufacturer}. Keep disconnected until installed."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "label"), [("model_number", "Part/model number"), ("serial_number", "Serial number")]
+)
+async def test_single_character_identifier_correction_preserves_short_warnings(gateway, field, label):
+    response = await submit(
+        gateway,
+        [
+            {
+                "name": "Relay",
+                "description": f"Relay. {label}: X. Flammable. Keep away from heat.",
+                field: "Y",
+                "previous_identifiers": {field: "X"},
+            }
+        ],
+    )
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"Relay. Flammable. Keep away from heat. {label}: Y."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("label", ["Compatible Manufacturer", "Previous Part/model number", "Original Serial number"])
+async def test_create_preserves_longer_authored_headings(gateway, label):
+    field = {
+        "Compatible Manufacturer": "manufacturer",
+        "Previous Part/model number": "model_number",
+        "Original Serial number": "serial_number",
+    }[label]
+    own = {"manufacturer": "Manufacturer", "model_number": "Part/model number", "serial_number": "Serial number"}[field]
+    original = f"Adapter. {label}: Acme."
+    response = await submit(gateway, [{"name": "Adapter", "description": original, field: "NewCo"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"{original} {own}: NewCo."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [None, "X", "X. Flammable"])
+async def test_ambiguous_company_and_warning_require_matching_source(gateway, previous):
+    """The same text can encode either a brand or a warning. Never infer permission to delete the warning."""
+    description = "Relay. Manufacturer: X. Flammable. Keep away from heat."
+    item = {"name": "Relay", "description": description, "manufacturer": "NewCo"}
+    if previous:
+        item["previous_identifiers"] = {"manufacturer": previous}
+    response = await submit(gateway, [item])
+    if previous is None:
+        assert response.status_code == 207
+        assert "Cannot safely separate" in response.json()["errors"][0]
+        gateway.create_item.assert_not_awaited()
+    else:
+        assert response.status_code == 200
+        note = "Flammable. " if previous == "X" else ""
+        assert (
+            gateway.create_item.call_args.args[0].description
+            == f"Relay. {note}Keep away from heat. Manufacturer: NewCo."
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_an_unpunctuated_manufacturer_at_the_description_limit(gateway):
+    tail = ".\nManufacturer: Acme\nKeep dry."
+    description = "x" * (1000 - len(tail)) + tail
+    response = await submit(gateway, [{"name": "Relay", "description": description, "manufacturer": "Acme"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == description
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["Acme", "St. Jude", "Acme Inc."])
+@pytest.mark.parametrize("state", ["unchanged", "corrected", "cleared"])
+async def test_authored_recall_warning_in_a_manufacturer_clause_is_never_removed(gateway, name, state):
+    description = f"Relay. Manufacturer: {name} (recalled; do not energize)."
+    desired = {"unchanged": name, "corrected": "NewCo", "cleared": None}[state]
+    item = {"name": "Relay", "description": description, "manufacturer": desired}
+    expected = description
+    if state != "unchanged":
+        item["previous_identifiers"] = {"manufacturer": name}
+        expected = description.replace("Manufacturer:", "Previous manufacturer:")
+        if desired:
+            expected += " Manufacturer: NewCo."
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_unverified_labelled_content_is_not_deleted_or_written(gateway):
+    response = await submit(
+        gateway, [{"name": "Relay", "description": "Relay. Serial number: Check before use.", "serial_number": None}]
+    )
+    assert "Cannot safely separate" in response.json()["errors"][0]
+    gateway.create_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("submitted", ["Acme Inc.", "NewCo Ltd.", None])
+async def test_single_terminal_period_in_company_name_precedes_other_metadata(gateway, submitted):
+    description = "Relay. Manufacturer: Acme Inc. Part/model number: P-1. Keep dry."
+    item = {"name": "Relay", "description": description, "manufacturer": submitted, "model_number": "P-1"}
+    if submitted != "Acme Inc.":
+        item["previous_identifiers"] = {"manufacturer": "Acme Inc."}
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = "Relay. Part/model number: P-1. Keep dry."
+    if submitted == "Acme Inc.":
+        expected = description
+    elif submitted:
+        expected += " Manufacturer: NewCo Ltd."
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gap", [" ", "\t"])
+async def test_create_recognizes_spacing_before_a_label_colon(gateway, gap):
+    description = f"Controller. Manufacturer{gap}: Acme. Voltage{gap}: 24V. Keep dry."
+    item = {
+        "name": "Controller",
+        "description": description,
+        "manufacturer": "NewCo",
+        "previous_identifiers": {"manufacturer": "Acme"},
+        "custom_fields": {"Voltage": "24V"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert (
+        gateway.create_item.call_args.args[0].description
+        == f"Controller. Voltage{gap}: 24V. Keep dry. Manufacturer: NewCo."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [False, True])
+async def test_detected_prose_with_comma_delimited_serial_saves_without_change(gateway, previous):
+    from homebox_companion.tools.vision.description_policy import aggregate_description
+
+    prose = "Device, serial number: SN-123, model ABC-456."
+    fields = {"serial_number": "SN-123", "model_number": "ABC-456"}
+    detected = aggregate_description(prose, **fields)
+    assert detected == prose
+    item = {"name": "Device", "description": detected, **fields}
+    if previous:
+        item["previous_identifiers"] = fields
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == prose
+
+
+@pytest.mark.asyncio
+async def test_canonical_serial_followed_by_a_comma_saves_verbatim(gateway):
+    prose = "Serial number: SN-123, keep dry."
+    response = await submit(gateway, [{"name": "Device", "description": prose, "serial_number": "SN-123"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == prose
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gap", ["\u00a0", "\u202f", "\u3000"])
+@pytest.mark.parametrize("desired", ["Acme", "NewCo"])
+async def test_create_preserves_unicode_spacing_before_an_identity_note(gateway, gap, desired):
+    text = f"Relay. Manufacturer: Acme{gap}(recalled)."
+    item = {
+        "name": "Relay",
+        "description": text,
+        "manufacturer": desired,
+        "previous_identifiers": {"manufacturer": "Acme"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = text if desired == "Acme" else f"Relay. Previous manufacturer: Acme{gap}(recalled). Manufacturer: NewCo."
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_use_compatibility_as_the_current_manufacturer(gateway):
+    text = "Compatible with Acme appliances."
+    response = await submit(gateway, [{"name": "Adapter", "description": text, "manufacturer": "Acme"}])
+    assert response.status_code == 200
+    assert gateway.create_item.call_args.args[0].description == f"{text} Manufacturer: Acme."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["manufacturer", "model_number", "serial_number"])
+async def test_oversized_previous_identifier_fails_only_its_item_before_a_write(gateway, field):
+    item = {"name": "Invalid", "description": "Relay.", field: "New", "previous_identifiers": {field: "X" * 65536}}
+    response = await submit(gateway, [item, {"name": "Valid"}])
+    assert response.status_code == 207
+    assert "255 characters" in response.json()["errors"][0]
+    gateway.create_item.assert_awaited_once()
+    assert gateway.create_item.call_args.args[0].name == "Valid"
+
+
+@pytest.mark.asyncio
+async def test_oversized_technical_value_is_rejected_before_aggregating(gateway):
+    item = {"name": "Relay", "description": "Relay.", "custom_fields": {"Voltage": "V" * 65536}}
+    response = await submit(gateway, [item])
+    assert response.status_code == 207
+    assert "1000 characters" in response.json()["errors"][0]
+    gateway.create_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\r", "\u0085"])
+@pytest.mark.parametrize("desired", [None, "NewCo"])
+async def test_create_recognizes_unicode_line_boundaries_around_an_identity(gateway, separator, desired):
+    description = f"Relay{separator}Manufacturer: Acme{separator}Keep dry."
+    item = {
+        "name": "Relay",
+        "description": description,
+        "manufacturer": desired,
+        "previous_identifiers": {"manufacturer": "Acme"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    expected = f"Relay{separator}Keep dry."
+    if desired:
+        expected += " Manufacturer: NewCo."
+    assert gateway.create_item.call_args.args[0].description == expected
+
+
+@pytest.mark.asyncio
+async def test_many_removed_manufacturer_lines_leave_only_their_authored_notes(gateway):
+    rows = ["Manufacturer: Old. Keep dry."] + ["Manufacturer: Old."] * 36 + ["Manufacturer: Old. Keep sealed."]
+    item = {
+        "name": "Relay",
+        "description": "Relay.\n" + "\n".join(rows),
+        "manufacturer": None,
+        "previous_identifiers": {"manufacturer": "Old"},
+    }
+    response = await submit(gateway, [item])
+    assert response.status_code == 200
+    saved_text = gateway.create_item.call_args.args[0].description
+    assert [row.strip() for row in saved_text.splitlines()] == ["Relay.", "Keep dry.", "Keep sealed."]
