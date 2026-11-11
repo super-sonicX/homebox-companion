@@ -18,6 +18,135 @@ async function resume(page: Page) {
 	await expect(page).toHaveURL(/\/review$/);
 }
 
+test('model edits survive keystrokes, photo replacement and draft recovery', async ({
+	page,
+	api,
+}) => {
+	api.allowPageError(/navigation aborted/);
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Bracket',
+					quantity: 1,
+					description: 'Bracket, model OLD-123.',
+					model_number: 'OLD-123',
+				},
+			],
+		})
+	);
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	const model = page.getByLabel('Model Number', { exact: true });
+	const description = page.getByLabel('Description', { exact: true });
+	await model.press('End');
+	for (let i = 0; i < 5; i++) await model.press('Backspace');
+	await expect(model).toHaveValue('OL');
+	await saved(page);
+	await resume(page);
+	await expect(model).toHaveValue('OL');
+	await model.fill('');
+	await page.getByRole('button', { name: /Attached Photos/ }).click();
+	await page.getByRole('button', { name: 'Remove image', exact: true }).click();
+	const photo = fileURLToPath(
+		new URL('../../../tests/assets/multi_item_single_image.jpg', import.meta.url)
+	);
+	await page.locator('input[type="file"]').first().setInputFiles(photo);
+	await saved(page);
+	await resume(page);
+	await page.getByRole('button', { name: 'Extended Fields', exact: true }).click();
+	await model.pressSequentially('NEW-456');
+	await expect(description).toHaveValue('Bracket, model NEW-456.');
+	await description.fill('Manual note for NEW-456.');
+	await model.fill('ABC-1');
+	await expect(description).toHaveValue('Manual note for NEW-456. Part/model number: ABC-1.');
+	await description.fill('Revised note, model ABC-1.');
+	await model.fill('ZZZ-8');
+	await expect(description).toHaveValue('Revised note, model ZZZ-8.');
+});
+
+test('confirming an untouched item sends its original identifiers including null', async ({
+	page,
+	api,
+}) => {
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Relay',
+					quantity: 1,
+					manufacturer: 'Acme',
+					serial_number: null,
+					description: 'Manufacturer: Acme Corp. Serial number: unknown.',
+				},
+			],
+		})
+	);
+	let submitted: Record<string, unknown> | undefined;
+	api.on('POST', '/api/items', (request) => {
+		submitted = request.postDataJSON().items[0];
+		return json(createdItem('saved'));
+	});
+	api.on('PUT', '/api/items/saved', () => json({}));
+	api.on('POST', '/api/items/saved/attachments', () => json({}));
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+	await page.getByRole('button', { name: /Submit All Items/ }).click();
+	await expect(page).toHaveURL(/\/success$/);
+	expect(submitted?.previous_identifiers).toMatchObject({
+		manufacturer: 'Acme',
+		serial_number: null,
+	});
+});
+
+test('clearing a heading keeps its following note protected after reload and a second edit', async ({
+	page,
+	api,
+}) => {
+	api.allowPageError(/navigation aborted/);
+	api.on('POST', '/api/tools/vision/detect', () =>
+		json({
+			items: [
+				{
+					name: 'Relay',
+					quantity: 1,
+					manufacturer: 'WrongCo',
+					model_number: 'OLD-123',
+					description: 'Relay. Manufacturer: WrongCo. Safety: OLD-123 is hazardous.',
+				},
+			],
+		})
+	);
+	let submitted: Record<string, unknown> | undefined;
+	api.on('POST', '/api/items', (request) => {
+		submitted = request.postDataJSON().items[0];
+		return json(createdItem('saved'));
+	});
+	api.on('PUT', '/api/items/saved', () => json({}));
+	api.on('POST', '/api/items/saved/attachments', () => json({}));
+	await selectLocation(page);
+	await uploadPhoto(page);
+	await analyzePhotos(page);
+	await page.getByLabel('Manufacturer', { exact: true }).fill('');
+	await saved(page);
+	await resume(page);
+	await page.getByLabel('Model Number', { exact: true }).fill('NEW-456');
+	await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+		'Relay. Safety: OLD-123 is hazardous. Part/model number: NEW-456.'
+	);
+	await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+	await page.getByRole('button', { name: /Submit All Items/ }).click();
+	await expect(page).toHaveURL(/\/success$/);
+	expect(submitted?.previous_identifiers).toMatchObject({
+		manufacturer: 'WrongCo',
+		model_number: 'OLD-123',
+	});
+	expect(submitted).not.toHaveProperty('descriptionSource');
+});
+
 test('unconfirmed rich edits and ordered replacement photos recover, including summary editing', async ({
 	page,
 	api,
@@ -27,6 +156,8 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	api.on('POST', '/api/tools/vision/detect', () =>
 		json({ items: [{ name: 'Original', quantity: 1, custom_fields: { Material: 'Wood' } }] })
 	);
+	const expectedDescription =
+		'Description — edited. Manufacturer: Maker. Part/model number: Model. Serial number: Serial.';
 	const creations: unknown[] = [];
 	api.on('POST', '/api/items', (request) => {
 		creations.push(request.postDataJSON());
@@ -81,7 +212,7 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	await resume(page);
 	await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Recovered 名称');
 	await expect(page.getByLabel('Quantity', { exact: true })).toHaveValue('7');
-	await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Description — edited');
+	await expect(page.getByLabel('Description', { exact: true })).toHaveValue(expectedDescription);
 	await expect(page.getByLabel('Asset ID', { exact: true })).toHaveValue('123-456');
 	expect((await readDrafts(page, 'deployment:user:g1'))[0].activeReviewDraft).toMatchObject({
 		customThumbnail: expect.stringMatching(/^data:image/),
@@ -114,7 +245,7 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 				expect.objectContaining({
 					name: 'Summary recovered',
 					quantity: 7,
-					description: 'Description — edited',
+					description: expectedDescription,
 					manufacturer: 'Maker',
 					model_number: 'Model',
 					serial_number: 'Serial',
@@ -129,7 +260,13 @@ test('unconfirmed rich edits and ordered replacement photos recover, including s
 	]);
 	expect(uploads).toHaveLength(2);
 	const payload = JSON.stringify(creations);
-	for (const internal of ['reviewId', 'activeReviewDraft', 'photos', 'sourceImageIndex'])
+	for (const internal of [
+		'reviewId',
+		'descriptionSource',
+		'activeReviewDraft',
+		'photos',
+		'sourceImageIndex',
+	])
 		expect(payload).not.toContain(`"${internal}"`);
 });
 

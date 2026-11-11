@@ -11,6 +11,7 @@ import { createUuidV4 } from '$lib/utils/uuid';
 
 import type { ReviewItem, ConfirmedItem } from '$lib/types';
 import { copyReviewItem } from '$lib/services/reviewEditor.svelte';
+import { reconcileDescriptionMetadata } from '$lib/services/descriptionMetadata';
 
 // =============================================================================
 // REVIEW SERVICE CLASS
@@ -41,7 +42,12 @@ export class ReviewService {
 
 	updateDraft(updates: Partial<ReviewItem>, identity: string | undefined): boolean {
 		if (!identity || this.activeDraft?.reviewId !== identity) return false;
-		this._activeDraft = copyReviewItem({ ...this.activeDraft, ...updates, reviewId: identity });
+		const synchronized = reconcileDescriptionMetadata(this.activeDraft, updates);
+		this._activeDraft = copyReviewItem({
+			...this.activeDraft,
+			...synchronized,
+			reviewId: identity,
+		});
 		return true;
 	}
 
@@ -134,7 +140,7 @@ export class ReviewService {
 		if (index < 0 || index >= this._detectedItems.length) return;
 
 		this._detectedItems = this._detectedItems.map((item, i) =>
-			i === index ? { ...item, ...updates } : item
+			i === index ? { ...item, ...reconcileDescriptionMetadata(item, updates) } : item
 		);
 	}
 

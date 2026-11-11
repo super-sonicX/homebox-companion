@@ -219,10 +219,16 @@ export class SubmissionService {
 		this.itemStatuses = { ...this.itemStatuses, [index]: 'creating' };
 
 		try {
+			const originalIdentifiers = confirmedItem.descriptionSource ?? confirmedItem;
 			const itemInput: ItemInput = {
 				name: confirmedItem.name,
 				quantity: confirmedItem.quantity,
 				description: confirmedItem.description,
+				previous_identifiers: {
+					manufacturer: originalIdentifiers.manufacturer,
+					model_number: originalIdentifiers.model_number,
+					serial_number: originalIdentifiers.serial_number,
+				},
 				tag_ids: confirmedItem.tag_ids,
 				parent_id: parentId,
 				manufacturer: confirmedItem.manufacturer,
