@@ -148,7 +148,7 @@ async def create_items(
                 model_number=detected_item.model_number,
                 serial_number=detected_item.serial_number,
                 explicitly_updated=frozenset(item_input.model_fields_set),
-                previous_identifiers=item_input.previous_identifiers,
+                previous_identifiers={key: value for key, value in (item_input.previous_identifiers or {}).items()},
             )
             item_description = aggregate_description(
                 reconciled,

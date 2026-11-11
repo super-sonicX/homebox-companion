@@ -25,6 +25,7 @@ def test_aggregates_manufacturer_and_part_number_without_sacrificing_structured_
     )
     assert item.manufacturer == "Peugeot"
     assert item.model_number == "PG4301005"
+    assert item.description is not None
     assert "Peugeot" in item.description
     # The Pydantic transport model must not aggregate identifiers before the
     # API can preserve overflowing items for editing before creation.
@@ -601,11 +602,15 @@ def test_an_adapter_target_introduced_by_for_does_not_supply_its_manufacturer():
 
 
 @pytest.mark.parametrize(
-    ("field", "label"), [("model_number", "Part/model number"), ("serial_number", "Serial number")]
+    ("model_number", "serial_number", "label"),
+    [("ABC-123", None, "Part/model number"), (None, "ABC-123", "Serial number")],
 )
-def test_an_adapter_target_cannot_supply_the_items_model_or_serial(field, label):
+def test_an_adapter_target_cannot_supply_the_items_model_or_serial(model_number, serial_number, label):
     text = "Adapter for ABC-123 sockets."
-    assert aggregate_description(text, **{field: "ABC-123"}) == f"{text} {label}: ABC-123."
+    assert (
+        aggregate_description(text, model_number=model_number, serial_number=serial_number)
+        == f"{text} {label}: ABC-123."
+    )
 
 
 @pytest.mark.parametrize("cue", ["made by", "manufactured by"])

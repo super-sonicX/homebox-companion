@@ -451,7 +451,6 @@ async def test_images_lite_uses_https_thumbnail_when_original_missing(monkeypatc
     assert lib.verify_result(results[1]["id"])["image_url"].startswith("https://encrypted-tbn0.gstatic.com/")
 
 
-
 def test_importing_catalogue_images_does_not_change_pillow_process_wide_limits():
     """A catalogue import cannot lower the image limit for unrelated camera captures."""
     import os

@@ -424,7 +424,7 @@ async def test_detected_prose_with_comma_delimited_serial_saves_without_change(g
 
     prose = "Device, serial number: SN-123, model ABC-456."
     fields = {"serial_number": "SN-123", "model_number": "ABC-456"}
-    detected = aggregate_description(prose, **fields)
+    detected = aggregate_description(prose, serial_number=fields["serial_number"], model_number=fields["model_number"])
     assert detected == prose
     item = {"name": "Device", "description": detected, **fields}
     if previous:
