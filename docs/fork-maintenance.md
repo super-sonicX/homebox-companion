@@ -59,12 +59,12 @@ process and upstream PRs are separate from this private deployment decision.
    tests against real inventory.
 
 4. Open a PR from the update branch to super-sonicX/homebox-companion main.
-   Triage every CodeRabbit and other review finding using the
+   Triage every Codex and other review finding using the
    [upstream-compatible review policy](review-triage-upstream.md). Fix confirmed
    fork regressions, required integration defects and high/critical risks.
    Document evidence-based deferral of unrelated, pre-existing upstream defects assessed as not high/critical
    and provide technical rationales for false positives. Rerun affected tests
-   after fixes, request CodeRabbit re-review after every new PR commit, and
+   after fixes, request Codex re-review after every new PR commit, and
    merge only when the **final PR head** has a completed review, all findings
    have provenance- and impact-supported dispositions, and all blocking fixes
    are complete.
